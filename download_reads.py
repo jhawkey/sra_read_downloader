@@ -66,6 +66,7 @@ def main():
             # parse each line
             for line in f:
                 acc_no = line.strip()
+                # accessions should
                 # check that the accession number has a valid prefix
                 if not acc_no.startswith('SRR') or not acc_no.startswith('ERR') or not acc_no.startswith('DRR'):
                     logging.info('Accession %s is not valid (must being with SRR, ERR or DRR). Not downloading.' % acc_no)
@@ -142,6 +143,7 @@ def main():
     #   were not downloaded, as well as the read set that was downloaded (and whether these read
     #   sets are Illumina or long, etc)
     # - a file of all successfully downloaded accessions and their locations
+
 
 if __name__ == '__main__':
     main()
