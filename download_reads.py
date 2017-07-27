@@ -368,25 +368,24 @@ def main():
             # check table not empty
             check_dataframe_status(genome_trackr_table)
 
-        # we need SRS numbers, leave this for now
-        # when doing this grab any long reads
-
-
         # do a check that all sample values are unique
         duplicated_series = genome_trackr_table.duplicated(subset='biosample_acc', keep=False)
         if len(duplicated_series[duplicated_series]) != 0:
             # do stuff
             pass
+        # we need SRS numbers, leave this for now
+        # when doing this grab any long reads
+        genome_trackr_SAMN= list(genome_trackr_table['biosample_acc'])
 
         # now get SRR numbers
-        genome_trackr_srr = list(genome_trackr_table['Run'])
+        #genome_trackr_srr = list(genome_trackr_table['Run'])
         # for any where there are multiple accessions, just take the first one
-        for acc in genome_trackr_srr:
-            if ',' in acc:
-                new_acc = acc.split(',')[0]
-                acc_list.append(new_acc)
-            else:
-                acc_list.append(acc)
+        #for acc in genome_trackr_srr:
+        #    if ',' in acc:
+        #        new_acc = acc.split(',')[0]
+        #        acc_list.append(new_acc)
+        #    else:
+        #        acc_list.append(acc)
 
     ###
     # Use SRA Toolkit to download each accession ID from acc_list
