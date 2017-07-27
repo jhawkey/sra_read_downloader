@@ -131,7 +131,6 @@ def get_multiple_run_warning_message(runs, run_type, biosample):
 
 
 class BioSample(object):
-
     def __init__(self, biosample_xml):
 
         self.uid = biosample_xml.attrib.get('id')
@@ -151,7 +150,6 @@ class BioSample(object):
         self.long_read_experiments = []
         self.other_experiments = []
         self.warnings = []
-
 
     def __repr__(self):
         biosample_repr = str(self.accession) + ' (' + self.taxonomy_name
@@ -248,7 +246,6 @@ class SraExperiment(object):
 
 
 class SraRun(object):
-
     def __init__(self, sra_run_xml):
         self.accession = sra_run_xml.attrib.get('accession')
         self.sample = None
@@ -271,7 +268,6 @@ class SraRun(object):
         assert len(self.read_counts) == self.read_file_count
         assert len(self.read_average_lengths) == self.read_file_count
         assert len(self.read_stdevs) == self.read_file_count
-
 
     def __repr__(self):
         return self.sample.sra_sample_accession + '_' + \
