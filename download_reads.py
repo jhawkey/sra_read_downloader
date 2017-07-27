@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-
-import asyncio
 import argparse
+import asyncio
 import logging
 import pathlib
+import re
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
+
 
 from holtlib import slurm_job
 from holtlib import slurm_modules
@@ -14,7 +15,7 @@ from holtlib import slurm_modules
 
 def sra_runs_from_bioproject_accessions(bioproject_accs):
     sra_runs = []
-    bioproject_uids = bioproject_uids_from_bioproject_accessions(bioproject_accs)
+    bioproject_uids = uids_from_accession(bioproject_accs, 'bioproject')
     biosample_uids = biosample_uids_from_bioproject_uids(bioproject_uids)
     biosamples = biosamples_from_biosample_uids(biosample_uids)
     for biosample in biosamples:
@@ -22,9 +23,15 @@ def sra_runs_from_bioproject_accessions(bioproject_accs):
     return sra_runs
 
 
-def bioproject_uids_from_bioproject_accessions(bioproject_accs):
-    esearch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' + \
-                  '?db=bioproject&term=' + ','.join(bioproject_accs)
+def uids_from_accession(accessions, database):
+    # Ensure accession argument is as a list
+    if not isinstance(accessions, list):
+        accessions = [accessions]
+    # Format URL
+    esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=%s&term=%s'
+    esearch_url = esearch_template_url % (database, ','.join(accessions))
+
+    # Make GET request
     with urllib.request.urlopen(esearch_url) as esearch_response:
         esearch_xml = esearch_response.read()
         esearch_root = ET.fromstring(esearch_xml)
@@ -124,6 +131,7 @@ def get_multiple_run_warning_message(runs, run_type, biosample):
 
 
 class BioSample(object):
+
     def __init__(self, biosample_xml):
 
         self.uid = biosample_xml.attrib.get('id')
@@ -143,6 +151,7 @@ class BioSample(object):
         self.long_read_experiments = []
         self.other_experiments = []
         self.warnings = []
+
 
     def __repr__(self):
         biosample_repr = str(self.accession) + ' (' + self.taxonomy_name
@@ -239,6 +248,7 @@ class SraExperiment(object):
 
 
 class SraRun(object):
+
     def __init__(self, sra_run_xml):
         self.accession = sra_run_xml.attrib.get('accession')
         self.sample = None
@@ -262,10 +272,10 @@ class SraRun(object):
         assert len(self.read_average_lengths) == self.read_file_count
         assert len(self.read_stdevs) == self.read_file_count
 
+
     def __repr__(self):
         return self.sample.sra_sample_accession + '_' + \
                self.accession + '_' + self.experiment.platform
-
 
 
 ###
@@ -275,7 +285,7 @@ def get_arguments():
 
     parser = argparse.ArgumentParser(description='Download reads from NCBI')
 
-    parser.add_argument('--accession_list', required=False, type=str,
+    parser.add_argument('--accession_list', required=False, type=pathlib.Path,
                         help='File of accessions (one per line)')
     parser.add_argument('--bioprojects', required=False, nargs='+',
                         help='NCBI BioProject accessions')
@@ -283,6 +293,8 @@ def get_arguments():
                         help='GenomeTrackr species')
     parser.add_argument('--logfile', default='download_reads.log',
                         help='Log file')
+
+    # Ensure that input files exist if specified
 
     return parser.parse_args()
 
@@ -316,33 +328,31 @@ def main():
     # Parse file with list of accession IDs
     ###
     if args.accession_list:
-        # check the file exists
-        if not args.accesion_list.exists():
-            logging.error('Accession list file, %s, does not exist. Quitting.' % args.accession_list)
-            # quit
-            sys.exit(1)
-        # read in file
-        logging.info('Reading in accession list file %s ...' % args.accesion_list)
+        # Get accessions
+        logging.info('Reading in accession list file %s' % args.accession_list)
+        with args.accession_list.open('r') as fh:
+            input_accessions = {line.rstrip() for line in fh}
 
-        # initilize counters
-        skipped_acc = 0
-        checked_acc = 0
+        # Construct validators
+        # TODO: add validators for PRJEB and SAMEA accessions
+        source_prefix = {'DR', 'ER', 'SR'}
+        type_suffix = {'project': 'P',
+                       'sample': 'S',
+                       'experiment': 'X',
+                       'run': 'R'}
 
-        # open accession list file and parse
-        with args.accesion_list.open() as f:
-            # parse each line
-            for line in f:
-                acc_no = line.strip()
-                # accessions should
-                # check that the accession number has a valid prefix
-                if not acc_no.startswith('SRR') or not acc_no.startswith('ERR') or not acc_no.startswith('DRR'):
-                    logging.info('Accession %s is not valid (must being with SRR, ERR or DRR). Not downloading.' % acc_no)
-                    skipped_acc += 1
-                    failed_acc[acc_no] = 'Invalid accession number'
-                else:
-                    # add each accession to master list
-                    acc_list.append(acc_no)
-                    checked_acc += 1
+        validators = {k: re.compile(r'^(?:%s)%s[0-9]+$' % ('|'.join(source_prefix), v)) for k, v in type_suffix.items()}
+
+        # Validate and sort accessions
+        validated_accessions = {k: list() for k in type_suffix.keys()}
+        for input_accession in input_accessions:
+            for accession_type, validator in validators.items():
+                if validator.match(input_accession):
+                    validated_accessions[accession_type].append(input_accession)
+                    break
+            else:
+                logging.error('Could not determine accession type for %s' % input_accession)
+
 
     ###
     # Locate accessions for all reads in a project ID
