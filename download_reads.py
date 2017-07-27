@@ -5,6 +5,8 @@ import argparse
 import logging
 import pathlib
 import sys
+import pandas as pd
+import datetime
 
 from holtlib import slurm_job
 from holtlib import slurm_modules
@@ -237,6 +239,21 @@ class SraRun(object):
     def __repr__(self):
         return str(self.accession)
 
+def validate(date_text):
+    '''
+    Check that date specified to script is valid
+    '''
+    try:
+        datetime.datetime.strptime(date_text, '%Y-%m-%d')
+    except ValueError:
+        logging.error('Date supplied (%s) for GenomeTrackr is in inccorrect format, should be YYYY-MM-DD.' % args.date)
+        raise ValueError("Incorrect data format, should be YYYY-MM-DD")
+
+# check that the table isn't empty
+def check_dataframe_status(data_frame):
+    if data_frame.empty:
+        logging.error('GenomeTrackr table is empty, please check that any subsetting commands given are correct.')
+
 ###
 # Argument parser
 ###
@@ -244,7 +261,10 @@ def get_arguments():
 
     parser = ArgumentParser(description='Download reads from NCBI')
 
-    parser.add_argument()
+    parser.add_argument('--species', required=False, type=str, help='Species of interest for GenomeTrackr.')
+    parser.add_argument('--date', required=False, type=str, help='Only required when downloading reads from GenomeTrackr. Will only download reads uploaded on or after the date specified in this argument. The corresponding column in the GenomeTrackr table is "target_creation_date". Date MUST be in the following format: YYYY-MM-DD.')
+    parser.add_argument('--genome_trackr_col', required=False, type=str, help='Name of column in GenomeTrackr table which will be used to select only rows which equal a particular value - this value can be set with --genome_trackr_col_value.')
+    parser.add_argument('--genome_trackr_col_value', required=False, type=str, help='Value in column of GenomeTrackr to use to select specific rows. Column name can be set with --genome_trackr_col.')
 
     return parser.parse_args()
 
@@ -272,6 +292,14 @@ def main():
 
     # key: accession, value: reason for failure
     failed_acc = {}
+
+    ###
+    # Check arguments
+    ###
+
+    # do a check to make sure date is in the right format
+    if args.date:
+        validate(args.date)
 
     ###
     # Parse file with list of accession IDs
@@ -321,15 +349,44 @@ def main():
     # Locate accessions for all reads from a GenomeTrackr species
     ###
     if args.genome_trackr:
-        pass
-        # To consider:
-        # - only downloading reads uploaded after a specified date
-        # - only downloading reads with a particular value in a column of the metadata table
-        # - if the sample ID should be checked to see if there are long reads associatd with it
-        # - if there are multiple entries per sample (don't want duplicates)
-        # - should take a look at some metadata files and see what columns are present
-        # - look at Zoe's script
+        #genome_trackr_table = pd.read_csv('genome_trackr_metadata_15082016.tsv', sep='\t')
+        logging.info('Reading in GenomeTrackr data for %s ...' % args.species)
+        genome_trackr_table = pd.read_csv(args.genome_trackr_file, sep='\t')
+        # if there's a date, extract anything after the date
+        if args.date:
+            # take all entires on or after specified date
+            logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % args.date)
+            genome_trackr_table = genome_trackr_table[geome_trackr_table['target_creation_date'] >= args.date]
+            # check table not empty
+            check_dataframe_status(genome_trackr_table)
 
+        if args.genome_trackr_col:
+            # extract only rows with column equaling value of interest
+            ## TO DO: Make this more robust
+            logging.info('Subsetting GenomeTrackr table on column %s with value of %s ...' % (args.genome_trackr_col, args.genome_trackr_col_value))
+            genome_trackr_table = geome_trackr_table[genome_trackr_table[args.genome_trackr_col] == args.genome_trackr_col_value]
+            # check table not empty
+            check_dataframe_status(genome_trackr_table)
+
+        # we need SRS numbers, leave this for now
+        # when doing this grab any long reads
+
+
+        # do a check that all sample values are unique
+        duplicated_series = genome_trackr_table.duplicated(subset='biosample_acc', keep=False)
+        if len(duplicated_series[duplicated_series]) != 0:
+            # do stuff
+            pass
+
+        # now get SRR numbers
+        genome_trackr_srr = list(genome_trackr_table['Run'])
+        # for any where there are multiple accessions, just take the first one
+        for acc in genome_trackr_srr:
+            if ',' in acc:
+                new_acc = acc.split(',')[0]
+                acc_list.append(new_acc)
+            else:
+                acc_list.append(acc)
 
     ###
     # Use SRA Toolkit to download each accession ID from acc_list
