@@ -357,19 +357,34 @@ def main():
             input_accessions = {line.rstrip() for line in fh}
 
         # Construct validators
-        # TODO: add validators for PRJEB and SAMEA accessions
+        validators = list()
+
+        # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
         source_prefix = {'DR', 'ER', 'SR'}
-        type_suffix = {'project': 'P',
-                       'sample': 'S',
+        type_suffices = {'bioproject': 'P',
+                       'biosample': 'S',
                        'experiment': 'X',
                        'run': 'R'}
 
-        validators = {k: re.compile(r'^(?:%s)%s[0-9]+$' % ('|'.join(source_prefix), v)) for k, v in type_suffix.items()}
+        for data_type, type_suffix in type_suffices.items():
+            # Generate regex
+            prefix_string = '|'.join(source_prefix)
+            sra_validator = re.compile(r'^(?:%s)%s[0-9]+$' % (prefix_string, type_suffix))
+
+            # Record
+            validators.append((data_type, sra_validator))
+
+        # PRJ and SAMN
+        bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
+        biosample_validator = re.compile(r'^SAMN[0-9]+$')
+
+        validators.append(('bioproject', bioproject_validator))
+        validators.append(('biosample', biosample_validator))
 
         # Validate and sort accessions
-        validated_accessions = {k: list() for k in type_suffix.keys()}
+        validated_accessions = {k: list() for k in type_suffices.keys()}
         for input_accession in input_accessions:
-            for accession_type, validator in validators.items():
+            for accession_type, validator in validators:
                 if validator.match(input_accession):
                     validated_accessions[accession_type].append(input_accession)
                     break
