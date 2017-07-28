@@ -1,19 +1,38 @@
 #!/usr/bin/env python3
-
-import asyncio
 import argparse
+import asyncio
 import logging
 import pathlib
+import re
 import sys
 import pandas as pd
 import datetime
+import urllib.request
+import xml.etree.ElementTree as ET
 
 from holtlib import slurm_job
 from holtlib import slurm_modules
 
-def bioproject_uids_from_bioproject_accessions(bioproject_accs):
-    esearch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi' + \
-                  '?db=bioproject&term=' + ','.join(bioproject_accs)
+
+def sra_runs_from_bioproject_accessions(bioproject_accs):
+    sra_runs = []
+    bioproject_uids = uids_from_accession(bioproject_accs, 'bioproject')
+    biosample_uids = biosample_uids_from_bioproject_uids(bioproject_uids)
+    biosamples = biosamples_from_biosample_uids(biosample_uids)
+    for biosample in biosamples:
+        sra_runs += biosample.get_sra_runs()
+    return sra_runs
+
+
+def uids_from_accession(accessions, database):
+    # Ensure accession argument is as a list
+    if not isinstance(accessions, list):
+        accessions = [accessions]
+    # Format URL
+    esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=%s&term=%s'
+    esearch_url = esearch_template_url % (database, ','.join(accessions))
+
+    # Make GET request
     with urllib.request.urlopen(esearch_url) as esearch_response:
         esearch_xml = esearch_response.read()
         esearch_root = ET.fromstring(esearch_xml)
@@ -72,6 +91,11 @@ def biosamples_from_biosample_uids(biosample_uids):
             biosample.long_read_experiments.append(experiment)
         else:
             biosample.other_experiments.append(experiment)
+
+    # Make sure all of the runs nested under this sample have the SRA sample ID.
+    for biosample in biosamples:
+        biosample.add_sra_sample_to_runs()
+
     return biosamples
 
 
@@ -126,6 +150,7 @@ class BioSample(object):
         self.illumina_experiments = []
         self.long_read_experiments = []
         self.other_experiments = []
+        self.warnings = []
 
     def __repr__(self):
         biosample_repr = str(self.accession) + ' (' + self.taxonomy_name
@@ -140,20 +165,25 @@ class BioSample(object):
         biosample_repr += ')'
         return biosample_repr
 
-    def get_sra_run_accessions(self):
+    def add_sra_sample_to_runs(self):
+        experiments = self.illumina_experiments + self.long_read_experiments + \
+                      self.other_experiments
+        runs = []
+        for experiment in experiments:
+            runs += experiment.runs
+
+        for run in runs:
+            run.sample = self
+
+    def get_sra_runs(self):
         """
         This function returns the SRA run accessions for this BioSample. It will include both
         Illumina and long read SRA runs. If there are multiple runs in a category (e.g. more than
         one Illumina run), it only returns the most recent.
 
-        It returns:
-          * a list of SRA run accessions
-          * a dictionary of SRA run accessions -> SRA sample accessions (for naming files)
-          * a list of warning messages
+        It returns a list of SraRun objects
         """
-        run_accessions = []
-        run_to_sample_dict = {}
-        warnings = []
+        runs = []
 
         illumina_runs, long_read_runs, other_runs = [], [], []
         for experiment in self.illumina_experiments:
@@ -168,24 +198,23 @@ class BioSample(object):
 
         if illumina_runs:
             illumina_run = illumina_runs[0]
-            run_accessions.append(illumina_run)
-            run_to_sample_dict[illumina_run] = self.sra_sample_accession
             if len(illumina_runs) > 1:
-                warnings.append(get_multiple_run_warning_message(illumina_runs, 'Illumina', self))
+                self.warnings.append(get_multiple_run_warning_message(illumina_runs, 'Illumina',
+                                                                      self))
+            runs.append(illumina_run)
 
         if long_read_runs:
             long_read_run = long_read_runs[0]
-            run_accessions.append(long_read_run)
-            run_to_sample_dict[long_read_run] = self.sra_sample_accession
+            runs.append(long_read_run)
             if len(long_read_runs) > 1:
-                warnings.append(get_multiple_run_warning_message(illumina_runs, 'long read', self))
+                self.warnings.append(get_multiple_run_warning_message(illumina_runs, 'long read',
+                                                                      self))
 
         if other_runs:
-            warnings.append('There were runs associated with sample ' + self.accession + ' which '
-                            'were neither Illumina reads nor long reads. They were ignored: ' +
-                            ', '.join(x.accession for x in other_runs))
-
-        return run_accessions, run_to_sample_dict, warnings
+            self.warnings.append('There were runs associated with sample ' + self.accession +
+                                 ' which were neither Illumina reads nor long reads. They were '
+                                 'ignored: ' + ', '.join(x.accession for x in other_runs))
+        return runs
 
 
 class SraExperiment(object):
@@ -209,7 +238,9 @@ class SraExperiment(object):
         self.instrument_model = platform_node.find('INSTRUMENT_MODEL').text
         self.runs = []
         for run_xml in sra_experiment_xml.findall('RUN_SET/RUN'):
-            self.runs.append(SraRun(run_xml))
+            run = SraRun(run_xml)
+            self.runs.append(run)
+            run.experiment = self
 
     def __repr__(self):
         return str(self.accession)
@@ -218,6 +249,9 @@ class SraExperiment(object):
 class SraRun(object):
     def __init__(self, sra_run_xml):
         self.accession = sra_run_xml.attrib.get('accession')
+        self.sample = None
+        self.experiment = None
+        self.warnings = []
         self.alias = sra_run_xml.attrib.get('alias')
         self.total_spots = int(sra_run_xml.attrib.get('total_spots'))
         self.total_bases = int(sra_run_xml.attrib.get('total_bases'))
@@ -237,7 +271,9 @@ class SraRun(object):
         assert len(self.read_stdevs) == self.read_file_count
 
     def __repr__(self):
-        return str(self.accession)
+        return self.sample.sra_sample_accession + '_' + \
+               self.accession + '_' + self.experiment.platform
+
 
 def validate(date_text):
     '''
@@ -259,14 +295,24 @@ def check_dataframe_status(data_frame):
 ###
 def get_arguments():
 
-    parser = ArgumentParser(description='Download reads from NCBI')
+    parser = argparse.ArgumentParser(description='Download reads from NCBI')
 
+    parser.add_argument('--accession_list', required=False, type=pathlib.Path,
+                        help='File of accessions (one per line)')
+    parser.add_argument('--bioprojects', required=False, nargs='+',
+                        help='NCBI BioProject accessions')
+    parser.add_argument('--genome_trackr', required=False, type=str,
+                        help='GenomeTrackr species')
+    parser.add_argument('--logfile', default='download_reads.log',
+                        help='Log file')
     parser.add_argument('--species', required=False, type=str, help='Species of interest for GenomeTrackr.')
     parser.add_argument('--date', required=False, type=str, help='Only required when downloading reads from GenomeTrackr. Will only download reads uploaded on or after the date specified in this argument. The corresponding column in the GenomeTrackr table is "target_creation_date". Date MUST be in the following format: YYYY-MM-DD.')
     parser.add_argument('--genome_trackr_col', required=False, type=str, help='Name of column in GenomeTrackr table which will be used to select only rows which equal a particular value - this value can be set with --genome_trackr_col_value.')
     parser.add_argument('--genome_trackr_col_value', required=False, type=str, help='Value in column of GenomeTrackr to use to select specific rows. Column name can be set with --genome_trackr_col.')
+    # Ensure that input files exist if specified
 
     return parser.parse_args()
+
 
 def main():
 
@@ -279,7 +325,7 @@ def main():
 
     # initialize logging file
     logging.basicConfig(
-        filename=logfile, # name of log file
+        filename=args.logfile, # name of log file
         level=logging.DEBUG, # set logging level to debug
         filemode='w', # write to log file (so will overwrite on subsequent runs)
         format='%(asctime)s %(message)s', # format the logfile
@@ -287,8 +333,8 @@ def main():
     logging.info('program started')
     logging.info('command line: {0}'.format(' '.join(sys.argv))) # print the command sent to the command line
 
-    # list of accessions to pass to fastq-dump
-    acc_list = []
+    # list of SRA runs
+    sra_runs = []
 
     # key: accession, value: reason for failure
     failed_acc = {}
@@ -305,45 +351,37 @@ def main():
     # Parse file with list of accession IDs
     ###
     if args.accession_list:
-        # check the file exists
-        if not args.accesion_list.exists():
-            logging.error('Accession list file, %s, does not exist. Quitting.' % args.accession_list)
-            # quit
-            sys.exit(1)
-        # read in file
-        logging.info('Reading in accession list file %s ...' % args.accesion_list)
+        # Get accessions
+        logging.info('Reading in accession list file %s' % args.accession_list)
+        with args.accession_list.open('r') as fh:
+            input_accessions = {line.rstrip() for line in fh}
 
-        # initilize counters
-        skipped_acc = 0
-        checked_acc = 0
+        # Construct validators
+        # TODO: add validators for PRJEB and SAMEA accessions
+        source_prefix = {'DR', 'ER', 'SR'}
+        type_suffix = {'project': 'P',
+                       'sample': 'S',
+                       'experiment': 'X',
+                       'run': 'R'}
 
-        # open accession list file and parse
-        with args.accesion_list.open() as f:
-            # parse each line
-            for line in f:
-                acc_no = line.strip()
-                # accessions should
-                # check that the accession number has a valid prefix
-                if not acc_no.startswith('SRR') or not acc_no.startswith('ERR') or not acc_no.startswith('DRR'):
-                    logging.info('Accession %s is not valid (must being with SRR, ERR or DRR). Not downloading.' % acc_no)
-                    skipped_acc += 1
-                    failed_acc[acc_no] = 'Invalid accession number'
-                else:
-                    # add each accession to master list
-                    acc_list.append(acc_no)
-                    checked_acc += 1
+        validators = {k: re.compile(r'^(?:%s)%s[0-9]+$' % ('|'.join(source_prefix), v)) for k, v in type_suffix.items()}
+
+        # Validate and sort accessions
+        validated_accessions = {k: list() for k in type_suffix.keys()}
+        for input_accession in input_accessions:
+            for accession_type, validator in validators.items():
+                if validator.match(input_accession):
+                    validated_accessions[accession_type].append(input_accession)
+                    break
+            else:
+                logging.error('Could not determine accession type for %s' % input_accession)
+
 
     ###
     # Locate accessions for all reads in a project ID
     ###
-    if args.project_no:
-         pass
-         # To consider:
-         # - which set of Illumina reads to download if there are multiple
-         # - which set of long reads to download if there are multiple
-         # - if long reads should be downloaded at all (perhaps a flag that is automatically set to true?)
-         # - in all cases, write out decision made to log file and record what other options could have occurred
-         # - create an output file for each sample with multiple read sets for the user to inspect
+    if args.bioprojects:
+        sra_runs += sra_runs_from_bioproject_accessions(args.bioprojects)
 
     ###
     # Locate accessions for all reads from a GenomeTrackr species
@@ -390,6 +428,8 @@ def main():
     ###
     # Use SRA Toolkit to download each accession ID from acc_list
     ###
+    for sra_run in sra_runs:
+        print(sra_run)  # TEMP
 
     # To do:
     # - use asyncio to launch only some jobs at once
