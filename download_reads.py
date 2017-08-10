@@ -24,13 +24,47 @@ def sra_runs_from_bioproject_accessions(bioproject_accs):
     return sra_runs
 
 
+def sra_runs_from_biosample_accessions(biosample_accs):
+    sra_runs = []
+    biosample_uids = uids_from_accession(biosample_accs, 'biosample')
+    biosamples = biosamples_from_biosample_uids(biosample_uids)
+    for biosample in biosamples:
+        sra_runs += biosample.get_sra_runs()
+    return sra_runs
+
+
+def sra_runs_from_sra_accessions(sra_accs):
+    sra_runs = []
+    sra_run_uids = uids_from_accession(sra_accs, 'sra')
+    biosample_uids = biosample_uids_from_sra_run_uids(sra_run_uids)
+    biosamples = biosamples_from_biosample_uids(biosample_uids)
+    for biosample in biosamples:
+        sra_runs += biosample.get_sra_runs()
+    return sra_runs
+
+
+def sra_runs_from_sra_run_accessions(sra_run_accs):
+    sra_runs = sra_runs_from_sra_accessions(sra_run_accs)
+    return [x for x in sra_runs if x.accession in sra_run_accs]
+
+
+def sra_runs_from_sra_experiment_accessions(sra_experiment_accs):
+    sra_runs = sra_runs_from_sra_accessions(sra_experiment_accs)
+    return [x for x in sra_runs if x.experiment.accession in sra_experiment_accs]
+
+
+def sra_runs_from_sra_sample_accessions(sra_sample_accs):
+    sra_runs = sra_runs_from_sra_accessions(sra_sample_accs)
+    return [x for x in sra_runs if x.sample.sra_sample_accession in sra_sample_accs]
+
+
 def uids_from_accession(accessions, database):
     # Ensure accession argument is as a list
     if not isinstance(accessions, list):
         accessions = [accessions]
     # Format URL
     esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=%s&term=%s'
-    esearch_url = esearch_template_url % (database, ','.join(accessions))
+    esearch_url = esearch_template_url % (database, '+OR+'.join(accessions))
 
     # Make GET request
     with urllib.request.urlopen(esearch_url) as esearch_response:
@@ -49,6 +83,20 @@ def biosample_uids_from_bioproject_uids(bioproject_uids):
         elink_root = ET.fromstring(elink_xml)
         for link_set_db in elink_root.findall('./LinkSet/LinkSetDb'):
             if link_set_db.find('./LinkName').text == 'bioproject_biosample_all':
+                return [x.text for x in link_set_db.findall('./Link/Id')]
+    return []
+
+
+def biosample_uids_from_sra_run_uids(sra_run_uids):
+    # TO DO: if there are too many SRA run UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
+
+    elink_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi' + \
+                '?dbfrom=sra&db=biosample&id=' + ','.join(sra_run_uids)
+    with urllib.request.urlopen(elink_url) as elink_response:
+        elink_xml = elink_response.read()
+        elink_root = ET.fromstring(elink_xml)
+        for link_set_db in elink_root.findall('./LinkSet/LinkSetDb'):
+            if link_set_db.find('./LinkName').text == 'sra_biosample':
                 return [x.text for x in link_set_db.findall('./Link/Id')]
     return []
 
@@ -301,6 +349,10 @@ def get_arguments():
                         help='File of accessions (one per line)')
     parser.add_argument('--bioprojects', required=False, nargs='+',
                         help='NCBI BioProject accessions')
+    parser.add_argument('--biosamples', required=False, nargs='+',
+                        help='NCBI BioSample accessions')
+    parser.add_argument('--sra', required=False, nargs='+',
+                        help='NCBI SRA accessions')
     parser.add_argument('--genome_trackr', required=False, type=str,
                         help='GenomeTrackr species')
     parser.add_argument('--logfile', default='download_reads.log',
@@ -394,10 +446,22 @@ def main():
 
 
     ###
-    # Locate accessions for all reads in a project ID
+    # Get SraRun objects from NCBI accessions
     ###
     if args.bioprojects:
         sra_runs += sra_runs_from_bioproject_accessions(args.bioprojects)
+    if args.biosamples:
+        sra_runs += sra_runs_from_biosample_accessions(args.biosamples)
+    if args.sra:
+        sra_run_accessions = [x for x in args.sra if x[2] == 'R']
+        sra_experiment_accessions = [x for x in args.sra if x[2] == 'X']
+        sra_sample_accessions = [x for x in args.sra if x[2] == 'S']
+        if sra_run_accessions:
+            sra_runs += sra_runs_from_sra_run_accessions(sra_run_accessions)
+        if sra_experiment_accessions:
+            sra_runs += sra_runs_from_sra_experiment_accessions(sra_experiment_accessions)
+        if sra_sample_accessions:
+            sra_runs += sra_runs_from_sra_sample_accessions(sra_sample_accessions)
 
     ###
     # Locate accessions for all reads from a GenomeTrackr species
