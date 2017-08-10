@@ -356,6 +356,7 @@ def main():
         with args.accession_list.open('r') as fh:
             input_accessions = {line.rstrip() for line in fh}
 
+        logging.info('Successfully read in %s accesions from file %s' % (str(len(input_accessions)), args.accession_list))
         # Construct validators
         validators = list()
 
@@ -404,12 +405,13 @@ def main():
     if args.genome_trackr:
         #genome_trackr_table = pd.read_csv('genome_trackr_metadata_15082016.tsv', sep='\t')
         logging.info('Reading in GenomeTrackr data for %s ...' % args.species)
+        # TEMP
         genome_trackr_table = pd.read_csv(args.genome_trackr_file, sep='\t')
         # if there's a date, extract anything after the date
         if args.date:
             # take all entires on or after specified date
             logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % args.date)
-            genome_trackr_table = genome_trackr_table[geome_trackr_table['target_creation_date'] >= args.date]
+            genome_trackr_table = genome_trackr_table[genome_trackr_table['target_creation_date'] >= args.date]
             # check table not empty
             check_dataframe_status(genome_trackr_table)
 
@@ -421,24 +423,14 @@ def main():
             # check table not empty
             check_dataframe_status(genome_trackr_table)
 
-        # do a check that all sample values are unique
-        duplicated_series = genome_trackr_table.duplicated(subset='biosample_acc', keep=False)
-        if len(duplicated_series[duplicated_series]) != 0:
-            # do stuff
-            pass
-        # we need SRS numbers, leave this for now
-        # when doing this grab any long reads
-        genome_trackr_SAMN= list(genome_trackr_table['biosample_acc'])
 
-        # now get SRR numbers
-        #genome_trackr_srr = list(genome_trackr_table['Run'])
-        # for any where there are multiple accessions, just take the first one
-        #for acc in genome_trackr_srr:
-        #    if ',' in acc:
-        #        new_acc = acc.split(',')[0]
-        #        acc_list.append(new_acc)
-        #    else:
-        #        acc_list.append(acc)
+        # get a list of all the biosample accessions for the entires of interest
+        genome_trackr_biosample_accessions = list(genome_trackr_table['biosample_acc'])
+        logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' % str(len(genome_trackr_biosample_accessions)))
+
+        # add to the list of sra objects for each biosample
+        sra_runs += sra_runs_from_biosample_accessions(genome_trackr_biosample_accessions)
+
 
     ###
     # Use SRA Toolkit to download each accession ID from acc_list
