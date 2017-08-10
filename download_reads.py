@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import datetime
+from ftplib import FTP
 import logging
 import pathlib
 import re
 import sys
-import pandas as pd
-import datetime
 import urllib.request
 import xml.etree.ElementTree as ET
-from ftplib import FTP
+
+
+import pandas as pd
+
 
 from holtlib import slurm_job
 from holtlib import slurm_modules
@@ -475,10 +478,10 @@ def main():
 
         # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
         source_prefix = {'DR', 'ER', 'SR'}
-        type_suffices = {'bioproject': 'P',
-                       'biosample': 'S',
-                       'experiment': 'X',
-                       'run': 'R'}
+        type_suffices = {sra_runs_from_bioproject_accessions: 'P',
+                         sra_runs_from_biosample_accessions: 'S',
+                         sra_runs_from_sra_experiment_accessions: 'X',
+                         sra_runs_from_sra_run_accessions: 'R'}
 
         for data_type, type_suffix in type_suffices.items():
             # Generate regex
@@ -492,8 +495,8 @@ def main():
         bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
         biosample_validator = re.compile(r'^SAMN[0-9]+$')
 
-        validators.append(('bioproject', bioproject_validator))
-        validators.append(('biosample', biosample_validator))
+        validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
+        validators.append((sra_runs_from_biosample_accessions, biosample_validator))
 
         # Validate and sort accessions
         validated_accessions = {k: list() for k in type_suffices.keys()}
@@ -505,6 +508,9 @@ def main():
             else:
                 logging.error('Could not determine accession type for %s' % input_accession)
 
+        # Init SraRun objects from sorted accessions using appropriate function
+        for func, accession in validated_accessions.items():
+            sra_runs.extend(func(accessions))
 
     ###
     # Get SraRun objects from NCBI accessions
