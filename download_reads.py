@@ -9,6 +9,7 @@ import pandas as pd
 import datetime
 import urllib.request
 import xml.etree.ElementTree as ET
+from ftplib import FTP
 
 from holtlib import slurm_job
 from holtlib import slurm_modules
@@ -467,6 +468,35 @@ def main():
     # Locate accessions for all reads from a GenomeTrackr species
     ###
     if args.genome_trackr:
+        # login to FTP server
+        ftp = FTP('ftp-trace.ncbi.nih.gov')
+        ftp.login()
+        # move to the genometrackr folder
+        ftp.cwd('pathogen/Results')
+        # TODO: get the correct species folder
+        ftp.cwd()
+        # get list of directories in species folder and identify most recent
+        # most recent folder will be PDG directory with biggest number
+        dir_list = ftp.nlst()
+        # intialise number to check against to see if we have biggest number
+        check_num = 0
+        for directory in dir_list:
+            if directory.startswith('PDG'):
+                folder_num = int(directory.split('.')[1])
+                if folder_num > check_num:
+                    # set check_num to be largest value we've seen
+                    check_num = folder_num
+                    # save the name of directory for later
+                    correct_dir = directory
+        # navigate into this directory and the Metadata folder
+        ftp.cwd(correct_dir + '/Metadata')
+        # open a temp file to download to
+        genome_trackr_file = open('genome_trackr_temp.tsv', 'w')
+        # download tsv file
+        ftp.retrbinary(correct_dir + '.metadata.tsv', genome_trackr_file.write)
+        # close the ftp connection
+        ftp.close()
+
         #genome_trackr_table = pd.read_csv('genome_trackr_metadata_15082016.tsv', sep='\t')
         logging.info('Reading in GenomeTrackr data for %s ...' % args.species)
         # TEMP
