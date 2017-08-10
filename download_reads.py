@@ -24,13 +24,22 @@ def sra_runs_from_bioproject_accessions(bioproject_accs):
     return sra_runs
 
 
+def sra_runs_from_biosample_accessions(biosample_accs):
+    sra_runs = []
+    biosample_uids = uids_from_accession(biosample_accs, 'biosample')
+    biosamples = biosamples_from_biosample_uids(biosample_uids)
+    for biosample in biosamples:
+        sra_runs += biosample.get_sra_runs()
+    return sra_runs
+
+
 def uids_from_accession(accessions, database):
     # Ensure accession argument is as a list
     if not isinstance(accessions, list):
         accessions = [accessions]
     # Format URL
     esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=%s&term=%s'
-    esearch_url = esearch_template_url % (database, ','.join(accessions))
+    esearch_url = esearch_template_url % (database, '+OR+'.join(accessions))
 
     # Make GET request
     with urllib.request.urlopen(esearch_url) as esearch_response:
@@ -301,6 +310,8 @@ def get_arguments():
                         help='File of accessions (one per line)')
     parser.add_argument('--bioprojects', required=False, nargs='+',
                         help='NCBI BioProject accessions')
+    parser.add_argument('--biosamples', required=False, nargs='+',
+                        help='NCBI BioSample accessions')
     parser.add_argument('--genome_trackr', required=False, type=str,
                         help='GenomeTrackr species')
     parser.add_argument('--logfile', default='download_reads.log',
@@ -393,10 +404,12 @@ def main():
 
 
     ###
-    # Locate accessions for all reads in a project ID
+    # Get SraRun objects from NCBI accessions
     ###
     if args.bioprojects:
         sra_runs += sra_runs_from_bioproject_accessions(args.bioprojects)
+    if args.biosamples:
+        sra_runs += sra_runs_from_biosample_accessions(args.biosamples)
 
     ###
     # Locate accessions for all reads from a GenomeTrackr species
