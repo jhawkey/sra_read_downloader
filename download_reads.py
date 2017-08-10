@@ -293,8 +293,21 @@ class SraExperiment(object):
     def __repr__(self):
         return str(self.accession)
 
+    def get_platform_short(self):
+        if self.platform == 'ILLUMINA':
+            return 'illumina'
+        elif self.platform == 'OXFORD_NANOPORE':
+            return 'nanopore'
+        elif self.platform == 'PACBIO_SMRT':
+            return 'pacbio'
+        else:
+            return 'other'
+
 
 class SraRun(object):
+
+    running_downloads = 0
+
     def __init__(self, sra_run_xml):
         self.accession = sra_run_xml.attrib.get('accession')
         self.sample = None
@@ -322,6 +335,49 @@ class SraRun(object):
         return self.sample.sra_sample_accession + '_' + \
                self.accession + '_' + self.experiment.platform
 
+    def get_filename_base(self):
+        return self.sample.sra_sample_accession + '_' + self.accession
+
+    async def download_task(self, simultaneous_downloads):
+
+        # Wait until there are free job slots
+        while SraRun.running_downloads >= simultaneous_downloads:
+            await asyncio.sleep(10)
+
+        # Consume a job slot when this job is executed
+        SraRun.running_downloads += 1
+
+        fastq_dump_cmd = ['fastq-dump', '--gzip']
+        if self.experiment.platform == 'ILLUMINA':
+            fastq_dump_cmd.append('--split-3')
+        fastq_dump_cmd += ['--readids', self.accession]
+
+        print(fastq_dump_cmd)  # TEMP
+        # TO DO: actually run fastq-dump
+
+        file_renames = []
+        if self.experiment.platform == 'ILLUMINA':
+            old_name_1 = self.accession + '_1.fastq.gz'
+            old_name_2 = self.accession + '_2.fastq.gz'
+            new_name_1 = self.get_filename_base() + '_1.fastq.gz'
+            new_name_2 = self.get_filename_base() + '_2.fastq.gz'
+            file_renames.append((old_name_1, new_name_1))
+            file_renames.append((old_name_2, new_name_2))
+        else:
+            old_name = self.accession + '.fastq.gz'
+            new_name = (self.get_filename_base() + '_' + self.experiment.get_platform_short() +
+                        '.fastq.gz')
+            file_renames.append((old_name, new_name))
+
+        for old_name, new_name in file_renames:
+            print(old_name, '->', new_name)  # TEMP
+            # TO DO: actually do the file renaming
+
+        print()  # TEMP
+
+        # Release job count and return
+        SraRun.running_downloads -= 1
+
 
 def validate(date_text):
     '''
@@ -333,10 +389,12 @@ def validate(date_text):
         logging.error('Date supplied (%s) for GenomeTrackr is in inccorrect format, should be YYYY-MM-DD.' % args.date)
         raise ValueError("Incorrect data format, should be YYYY-MM-DD")
 
+
 # check that the table isn't empty
 def check_dataframe_status(data_frame):
     if data_frame.empty:
         logging.error('GenomeTrackr table is empty, please check that any subsetting commands given are correct.')
+
 
 ###
 # Argument parser
@@ -357,6 +415,8 @@ def get_arguments():
                         help='GenomeTrackr species')
     parser.add_argument('--logfile', default='download_reads.log',
                         help='Log file')
+    parser.add_argument('--download_jobs', type=int, default=8,
+                        help='Number of simultaneous downloads to run at once')
     parser.add_argument('--species', required=False, type=str, help='Species of interest for GenomeTrackr.')
     parser.add_argument('--date', required=False, type=str, help='Only required when downloading reads from GenomeTrackr. Will only download reads uploaded on or after the date specified in this argument. The corresponding column in the GenomeTrackr table is "target_creation_date". Date MUST be in the following format: YYYY-MM-DD.')
     parser.add_argument('--genome_trackr_col', required=False, type=str, help='Name of column in GenomeTrackr table which will be used to select only rows which equal a particular value - this value can be set with --genome_trackr_col_value.')
@@ -495,21 +555,12 @@ def main():
         # add to the list of sra objects for each biosample
         sra_runs += sra_runs_from_biosample_accessions(genome_trackr_biosample_accessions)
 
-
-    ###
-    # Use SRA Toolkit to download each accession ID from acc_list
-    ###
-    for sra_run in sra_runs:
-        print(sra_run)  # TEMP
-
-    # To do:
-    # - use asyncio to launch only some jobs at once
-
-
-    # Example command for fastq-dump (Illumina reads)
-    # fastq-dump --split-3 --gzip --readids <acc>
-    # Example command for fastq-dump (long reads)
-    # fastq-dump --gzip --readids <acc>
+    # Use asyncio to download reads in parallel.
+    loop = asyncio.get_event_loop()
+    async_futures = asyncio.gather(*[x.download_task(args.download_jobs) for x in sra_runs])
+    logging.info('Downloading reads...')
+    loop.run_until_complete(async_futures)
+    loop.close()
 
     # Example of how to set up slurm job object
     '''
