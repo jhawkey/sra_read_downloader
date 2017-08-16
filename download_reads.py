@@ -553,14 +553,14 @@ def main():
         # open a temp file to download to
         genome_trackr_file = open('genome_trackr_temp.tsv', 'w')
         # download tsv file
-        ftp.retrbinary(correct_dir + '.metadata.tsv', genome_trackr_file.write)
-        # close the ftp connection
+        ftp.retrbinary('RETR ' + correct_folder + '.metadata.tsv', genome_trackr_file.write)
+        # close the ftp connection and the genome trackr file
         ftp.close()
+        genome_trackr_file.close()
 
         #genome_trackr_table = pd.read_csv('genome_trackr_metadata_15082016.tsv', sep='\t')
-        logging.info('Reading in GenomeTrackr data for %s ...' % args.species)
-        # TEMP
-        genome_trackr_table = pd.read_csv(args.genome_trackr_file, sep='\t')
+        logging.info('Reading in GenomeTrackr data for %s from genome_trackr_temp.tsv ...' % args.species)
+        genome_trackr_table = pd.read_csv('genome_trackr_temp.tsv', sep='\t')
         # if there's a date, extract anything after the date
         if args.date:
             # take all entires on or after specified date
