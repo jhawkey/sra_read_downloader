@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import datetime
+from ftplib import FTP
 import logging
+import os
 import pathlib
 import re
 import sys
-import pandas as pd
-import datetime
 import urllib.request
 import xml.etree.ElementTree as ET
-from ftplib import FTP
+
+
+import pandas as pd
+
 
 from holtlib import slurm_job
 from holtlib import slurm_modules
@@ -340,7 +344,6 @@ class SraRun(object):
         return self.sample.sra_sample_accession + '_' + self.accession
 
     async def download_task(self, simultaneous_downloads):
-
         # Wait until there are free job slots
         while SraRun.running_downloads >= simultaneous_downloads:
             await asyncio.sleep(10)
@@ -348,14 +351,32 @@ class SraRun(object):
         # Consume a job slot when this job is executed
         SraRun.running_downloads += 1
 
-        fastq_dump_cmd = ['fastq-dump', '--gzip']
+        fastq_dump_template = 'fastq-dump --gzip %s'
+
+        fastq_dump_args = list()
         if self.experiment.platform == 'ILLUMINA':
-            fastq_dump_cmd.append('--split-3')
-        fastq_dump_cmd += ['--readids', self.accession]
+            fastq_dump_args.append('--split-3')
+        fastq_dump_args.append('--readids')
+        fastq_dump_args.append(self.accession)
 
-        print(fastq_dump_cmd)  # TEMP
-        # TO DO: actually run fastq-dump
+        fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
 
+        # Get a subprocess coroutine and execute
+        logging.info('Downloading %s' % self.accession)
+        process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+        # Wait for subprocess to complete; blocking of current task
+        stdout, stderr = await process.communicate()
+        returncode = process.returncode
+
+        # TODO: requeue with adjusted parameters (attempt n times)
+        if returncode != 0:
+            # TODO: add some basic error handling
+            return
+
+        # File renaming/ moving synchronous but this won't be an issue
+        # ...unless we're somehow renaming/ moving files between filesystems
         file_renames = []
         if self.experiment.platform == 'ILLUMINA':
             old_name_1 = self.accession + '_1.fastq.gz'
@@ -371,10 +392,8 @@ class SraRun(object):
             file_renames.append((old_name, new_name))
 
         for old_name, new_name in file_renames:
-            print(old_name, '->', new_name)  # TEMP
-            # TO DO: actually do the file renaming
-
-        print()  # TEMP
+            # Rename file
+            os.rename(old_name, new_name)
 
         # Release job count and return
         SraRun.running_downloads -= 1
@@ -475,10 +494,10 @@ def main():
 
         # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
         source_prefix = {'DR', 'ER', 'SR'}
-        type_suffices = {'bioproject': 'P',
-                       'biosample': 'S',
-                       'experiment': 'X',
-                       'run': 'R'}
+        type_suffices = {sra_runs_from_bioproject_accessions: 'P',
+                         sra_runs_from_biosample_accessions: 'S',
+                         sra_runs_from_sra_experiment_accessions: 'X',
+                         sra_runs_from_sra_run_accessions: 'R'}
 
         for data_type, type_suffix in type_suffices.items():
             # Generate regex
@@ -492,8 +511,8 @@ def main():
         bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
         biosample_validator = re.compile(r'^SAMN[0-9]+$')
 
-        validators.append(('bioproject', bioproject_validator))
-        validators.append(('biosample', biosample_validator))
+        validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
+        validators.append((sra_runs_from_biosample_accessions, biosample_validator))
 
         # Validate and sort accessions
         validated_accessions = {k: list() for k in type_suffices.keys()}
@@ -505,6 +524,9 @@ def main():
             else:
                 logging.error('Could not determine accession type for %s' % input_accession)
 
+        # Init SraRun objects from sorted accessions using appropriate function
+        for func, accessions in validated_accessions.items():
+            sra_runs.extend(func(accessions))
 
     ###
     # Get SraRun objects from NCBI accessions
