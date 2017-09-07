@@ -383,6 +383,9 @@ class SraRun(object):
         assert len(self.read_average_lengths) == self.read_file_count
         assert len(self.read_stdevs) == self.read_file_count
 
+        self.attempts = 0
+        self.max_attempts = 3
+
     def __repr__(self):
         return self.sample.sra_sample_accession + '_' + \
                self.accession + '_' + self.experiment.platform
@@ -392,35 +395,52 @@ class SraRun(object):
 
     async def download_task(self, simultaneous_downloads):
         # Wait until there are free job slots
+        logging.info('Starting %s' % self.accession)
         while SraRun.running_downloads >= simultaneous_downloads:
             await asyncio.sleep(10)
 
         # Consume a job slot when this job is executed
         SraRun.running_downloads += 1
 
-        fastq_dump_template = 'fastq-dump --gzip %s'
+        while self.attempts < self.max_attempts:
+            # Increment download attempt
+            self.attempts += 1
 
-        fastq_dump_args = list()
-        if self.experiment.platform == 'ILLUMINA':
-            fastq_dump_args.append('--split-3')
-        fastq_dump_args.append('--readids')
-        fastq_dump_args.append(self.accession)
+            # Construct command
+            fastq_dump_template = 'fastq-dump --gzip %s'
 
-        fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
+            fastq_dump_args = list()
+            if self.experiment.platform == 'ILLUMINA':
+                fastq_dump_args.append('--split-3')
+            fastq_dump_args.append('--readids')
+            fastq_dump_args.append(self.accession)
 
-        # Get a subprocess coroutine and execute
-        logging.info('Downloading %s' % self.accession)
-        process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
-                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
 
-        # Wait for subprocess to complete; blocking of current task
-        stdout, stderr = await process.communicate()
-        returncode = process.returncode
+            # Get a subprocess coroutine and execute
+            logging.info('Downloading %s' % self.accession)
+            process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
-        # TODO: requeue with adjusted parameters (attempt n times)
-        if returncode != 0:
-            # TODO: add some basic error handling
-            return
+            # Wait for subprocess to complete; blocking of current task
+            stdout, stderr = await process.communicate()
+            returncode = process.returncode
+
+            # Check returncode
+            if returncode != 0:
+                # TODO: check if error is resulting from a connect error
+                # Example, don't retry if there was an issue other than a connection error:
+                connection_errors = [
+                    'connection busy while validating within network system module',
+                    'timeout exhausted while reading file within network system module',
+                    'Reading information from the socket failed',
+                    'transfer interrupted while reading file within network system module',
+                    'SSL - Connection requires a read call',
+                    'item not found while constructing within virtual database module'
+                    ]
+                if not any(e in stderr.decode() for e in connection_errors):
+                    break
+
 
         # File renaming/ moving synchronous but this won't be an issue
         # ...unless we're somehow renaming/ moving files between filesystems
