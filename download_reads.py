@@ -15,10 +15,6 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 
 
-from holtlib import slurm_job
-from holtlib import slurm_modules
-
-
 class BadAccession(Exception):
     pass
 
@@ -191,6 +187,48 @@ def get_multiple_run_warning_message(runs, run_type, biosample):
     return 'There were multiple ' + run_type + ' runs for sample ' + biosample.accession + \
            '. Only the most recent (' + runs[0].accession + ') was downloaded. These ' \
            'additional runs were ignored: ' + ', '.join(x.accession for x in runs[1:])
+
+
+def construct_accession_validators(type_suffices):
+    '''Generate regex and associate with appropriate NCBI SRA API functions'''
+    # Construct validators
+    validators = list()
+
+    # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
+    source_prefix = {'DR', 'ER', 'SR'}
+    for data_type, type_suffix in type_suffices.items():
+        # Generate regex
+        prefix_string = '|'.join(source_prefix)
+        sra_validator = re.compile(r'^(?:%s)%s[0-9]+$' % (prefix_string, type_suffix))
+
+        # Record
+        validators.append((data_type, sra_validator))
+
+    # PRJ and SAMN
+    bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
+    biosample_validator = re.compile(r'^SAMN[0-9]+$')
+
+    validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
+    validators.append((sra_runs_from_biosample_accessions, biosample_validator))
+
+    return validators
+
+
+def validate_accessions(input_accessions, validators, type_suffices):
+    '''Take a list of accessions and sort them using regex validators'''
+    # Return variable
+    validated_accessions = {k: list() for k in type_suffices.keys()}
+
+    # Sort
+    for input_accession in input_accessions:
+        for accession_type, validator in validators:
+            if validator.match(input_accession):
+                validated_accessions[accession_type].append(input_accession)
+                break
+        else:
+            logging.error('Could not determine accession type for %s' % input_accession)
+
+    return validated_accessions
 
 
 class BioSample(object):
@@ -498,40 +536,17 @@ def main():
             input_accessions = {line.rstrip() for line in fh}
 
         logging.info('Successfully read in %s accesions from file %s' % (str(len(input_accessions)), args.accession_list))
+
+
         # Construct validators
-        validators = list()
-
-        # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
-        source_prefix = {'DR', 'ER', 'SR'}
         type_suffices = {sra_runs_from_bioproject_accessions: 'P',
-                         sra_runs_from_biosample_accessions: 'S',
-                         sra_runs_from_sra_experiment_accessions: 'X',
-                         sra_runs_from_sra_run_accessions: 'R'}
+                            sra_runs_from_biosample_accessions: 'S',
+                            sra_runs_from_sra_experiment_accessions: 'X',
+                            sra_runs_from_sra_run_accessions: 'R'}
+        validators = construct_accession_validators(type_suffices)
 
-        for data_type, type_suffix in type_suffices.items():
-            # Generate regex
-            prefix_string = '|'.join(source_prefix)
-            sra_validator = re.compile(r'^(?:%s)%s[0-9]+$' % (prefix_string, type_suffix))
-
-            # Record
-            validators.append((data_type, sra_validator))
-
-        # PRJ and SAMN
-        bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
-        biosample_validator = re.compile(r'^SAMN[0-9]+$')
-
-        validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
-        validators.append((sra_runs_from_biosample_accessions, biosample_validator))
-
-        # Validate and sort accessions
-        validated_accessions = {k: list() for k in type_suffices.keys()}
-        for input_accession in input_accessions:
-            for accession_type, validator in validators:
-                if validator.match(input_accession):
-                    validated_accessions[accession_type].append(input_accession)
-                    break
-            else:
-                logging.error('Could not determine accession type for %s' % input_accession)
+        # Validate and sort input accessions
+        validated_accessions = validate_accessions(input_accessions, validators, type_suffices)
 
         # Init SraRun objects from sorted accessions using appropriate function
         for func, accessions in validated_accessions.items():
