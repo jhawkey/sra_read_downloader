@@ -19,6 +19,10 @@ from holtlib import slurm_job
 from holtlib import slurm_modules
 
 
+class BadAccession(Exception):
+    pass
+
+
 def sra_runs_from_bioproject_accessions(bioproject_accs):
     sra_runs = []
     bioproject_uids = uids_from_accession(bioproject_accs, 'bioproject')
@@ -64,7 +68,9 @@ def sra_runs_from_sra_sample_accessions(sra_sample_accs):
 
 
 def uids_from_accession(accessions, database):
-    # Ensure accession argument is as a list
+    """
+    Takes a list of accessions for any NCBI database, returns uids in no particular order.
+    """
     if not isinstance(accessions, list):
         accessions = [accessions]
     # Format URL
@@ -75,7 +81,10 @@ def uids_from_accession(accessions, database):
     with urllib.request.urlopen(esearch_url) as esearch_response:
         esearch_xml = esearch_response.read()
         esearch_root = ET.fromstring(esearch_xml)
-        return [x.text for x in esearch_root.findall('./IdList/Id')]
+        uids = [x.text for x in esearch_root.findall('./IdList/Id')]
+        if len(accessions) != len(uids):
+            raise BadAccession
+        return uids
 
 
 def biosample_uids_from_bioproject_uids(bioproject_uids):
@@ -152,18 +161,18 @@ def biosamples_from_biosample_uids(biosample_uids):
     return biosamples
 
 
-def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
-    # TO DO: if there are too many SRA UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
+    def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
+        # TO DO: if there are too many SRA UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
 
-    efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
-                 '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
-    sra_experiments = []
-    with urllib.request.urlopen(efetch_url) as efetch_response:
-        efetch_xml = efetch_response.read()
-        efetch_root = ET.fromstring(efetch_xml)
-        for sra_experiment_xml in efetch_root.findall('./EXPERIMENT_PACKAGE'):
-            sra_experiments.append(SraExperiment(sra_experiment_xml))
-    return sra_experiments
+        efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
+                     '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
+        sra_experiments = []
+        with urllib.request.urlopen(efetch_url) as efetch_response:
+            efetch_xml = efetch_response.read()
+            efetch_root = ET.fromstring(efetch_xml)
+            for sra_experiment_xml in efetch_root.findall('./EXPERIMENT_PACKAGE'):
+                sra_experiments.append(SraExperiment(sra_experiment_xml))
+        return sra_experiments
 
 
 def get_sra_run_accession_for_biosamples(biosamples):
