@@ -157,18 +157,18 @@ def biosamples_from_biosample_uids(biosample_uids):
     return biosamples
 
 
-    def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
-        # TO DO: if there are too many SRA UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
+def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
+    # TO DO: if there are too many SRA UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
 
-        efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
-                     '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
-        sra_experiments = []
-        with urllib.request.urlopen(efetch_url) as efetch_response:
-            efetch_xml = efetch_response.read()
-            efetch_root = ET.fromstring(efetch_xml)
-            for sra_experiment_xml in efetch_root.findall('./EXPERIMENT_PACKAGE'):
-                sra_experiments.append(SraExperiment(sra_experiment_xml))
-        return sra_experiments
+    efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
+                    '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
+    sra_experiments = []
+    with urllib.request.urlopen(efetch_url) as efetch_response:
+        efetch_xml = efetch_response.read()
+        efetch_root = ET.fromstring(efetch_xml)
+        for sra_experiment_xml in efetch_root.findall('./EXPERIMENT_PACKAGE'):
+            sra_experiments.append(SraExperiment(sra_experiment_xml))
+    return sra_experiments
 
 
 def get_sra_run_accession_for_biosamples(biosamples):
