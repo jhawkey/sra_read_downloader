@@ -437,9 +437,9 @@ def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_valu
     # navigate into this directory and the Metadata folder
     ftp.cwd(correct_dir + '/Metadata')
     # open a temp file to download to
-    genome_trackr_file = open(str(os.getpid()) + 'genome_trackr_temp.tsv', 'w')
+    genome_trackr_file = open(str(os.getpid()) + 'genome_trackr_temp.tsv', 'wb')
     # download tsv file
-    ftp.retrbinary('RETR ' + correct_folder + '.metadata.tsv', genome_trackr_file.write)
+    ftp.retrbinary('RETR ' + correct_dir + '.metadata.tsv', genome_trackr_file.write)
     # close the ftp connection and the genome trackr file
     ftp.close()
     genome_trackr_file.close()
