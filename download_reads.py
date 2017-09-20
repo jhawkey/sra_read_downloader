@@ -15,8 +15,8 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 
 
-from holtlib import slurm_job
-from holtlib import slurm_modules
+class BadAccession(Exception):
+    pass
 
 
 def sra_runs_from_bioproject_accessions(bioproject_accs):
@@ -64,7 +64,9 @@ def sra_runs_from_sra_sample_accessions(sra_sample_accs):
 
 
 def uids_from_accession(accessions, database):
-    # Ensure accession argument is as a list
+    """
+    Takes a list of accessions for any NCBI database, returns uids in no particular order.
+    """
     if not isinstance(accessions, list):
         accessions = [accessions]
     # Format URL
@@ -75,7 +77,10 @@ def uids_from_accession(accessions, database):
     with urllib.request.urlopen(esearch_url) as esearch_response:
         esearch_xml = esearch_response.read()
         esearch_root = ET.fromstring(esearch_xml)
-        return [x.text for x in esearch_root.findall('./IdList/Id')]
+        uids = [x.text for x in esearch_root.findall('./IdList/Id')]
+        if len(accessions) != len(uids):
+            raise BadAccession
+        return uids
 
 
 def biosample_uids_from_bioproject_uids(bioproject_uids):
@@ -156,7 +161,7 @@ def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
     # TO DO: if there are too many SRA UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
 
     efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
-                 '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
+                    '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
     sra_experiments = []
     with urllib.request.urlopen(efetch_url) as efetch_response:
         efetch_xml = efetch_response.read()
@@ -182,6 +187,48 @@ def get_multiple_run_warning_message(runs, run_type, biosample):
     return 'There were multiple ' + run_type + ' runs for sample ' + biosample.accession + \
            '. Only the most recent (' + runs[0].accession + ') was downloaded. These ' \
            'additional runs were ignored: ' + ', '.join(x.accession for x in runs[1:])
+
+
+def construct_accession_validators(type_suffices):
+    '''Generate regex and associate with appropriate NCBI SRA API functions'''
+    # Construct validators
+    validators = list()
+
+    # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
+    source_prefix = {'DR', 'ER', 'SR'}
+    for data_type, type_suffix in type_suffices.items():
+        # Generate regex
+        prefix_string = '|'.join(source_prefix)
+        sra_validator = re.compile(r'^(?:%s)%s[0-9]+$' % (prefix_string, type_suffix))
+
+        # Record
+        validators.append((data_type, sra_validator))
+
+    # PRJ and SAMN
+    bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
+    biosample_validator = re.compile(r'^SAMN[0-9]+$')
+
+    validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
+    validators.append((sra_runs_from_biosample_accessions, biosample_validator))
+
+    return validators
+
+
+def validate_accessions(input_accessions, validators, type_suffices):
+    '''Take a list of accessions and sort them using regex validators'''
+    # Return variable
+    validated_accessions = {k: list() for k in type_suffices.keys()}
+
+    # Sort
+    for input_accession in input_accessions:
+        for accession_type, validator in validators:
+            if validator.match(input_accession):
+                validated_accessions[accession_type].append(input_accession)
+                break
+        else:
+            logging.error('Could not determine accession type for %s' % input_accession)
+
+    return validated_accessions
 
 
 class BioSample(object):
@@ -336,6 +383,9 @@ class SraRun(object):
         assert len(self.read_average_lengths) == self.read_file_count
         assert len(self.read_stdevs) == self.read_file_count
 
+        self.attempts = 0
+        self.max_attempts = 3
+
     def __repr__(self):
         return self.sample.sra_sample_accession + '_' + \
                self.accession + '_' + self.experiment.platform
@@ -345,35 +395,52 @@ class SraRun(object):
 
     async def download_task(self, simultaneous_downloads):
         # Wait until there are free job slots
+        logging.info('Starting %s' % self.accession)
         while SraRun.running_downloads >= simultaneous_downloads:
             await asyncio.sleep(10)
 
         # Consume a job slot when this job is executed
         SraRun.running_downloads += 1
 
-        fastq_dump_template = 'fastq-dump --gzip %s'
+        while self.attempts < self.max_attempts:
+            # Increment download attempt
+            self.attempts += 1
 
-        fastq_dump_args = list()
-        if self.experiment.platform == 'ILLUMINA':
-            fastq_dump_args.append('--split-3')
-        fastq_dump_args.append('--readids')
-        fastq_dump_args.append(self.accession)
+            # Construct command
+            fastq_dump_template = 'fastq-dump --gzip %s'
 
-        fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
+            fastq_dump_args = list()
+            if self.experiment.platform == 'ILLUMINA':
+                fastq_dump_args.append('--split-3')
+            fastq_dump_args.append('--readids')
+            fastq_dump_args.append(self.accession)
 
-        # Get a subprocess coroutine and execute
-        logging.info('Downloading %s' % self.accession)
-        process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
-                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
 
-        # Wait for subprocess to complete; blocking of current task
-        stdout, stderr = await process.communicate()
-        returncode = process.returncode
+            # Get a subprocess coroutine and execute
+            logging.info('Downloading %s' % self.accession)
+            process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
-        # TODO: requeue with adjusted parameters (attempt n times)
-        if returncode != 0:
-            # TODO: add some basic error handling
-            return
+            # Wait for subprocess to complete; blocking of current task
+            stdout, stderr = await process.communicate()
+            returncode = process.returncode
+
+            # Check returncode
+            if returncode != 0:
+                # TODO: check if error is resulting from a connect error
+                # Example, don't retry if there was an issue other than a connection error:
+                connection_errors = [
+                    'connection busy while validating within network system module',
+                    'timeout exhausted while reading file within network system module',
+                    'Reading information from the socket failed',
+                    'transfer interrupted while reading file within network system module',
+                    'SSL - Connection requires a read call',
+                    'item not found while constructing within virtual database module'
+                    ]
+                if not any(e in stderr.decode() for e in connection_errors):
+                    break
+
 
         # File renaming/ moving synchronous but this won't be an issue
         # ...unless we're somehow renaming/ moving files between filesystems
@@ -539,40 +606,17 @@ def main():
             input_accessions = {line.rstrip() for line in fh}
 
         logging.info('Successfully read in %s accesions from file %s' % (str(len(input_accessions)), args.accession_list))
+
+
         # Construct validators
-        validators = list()
-
-        # DRP/DRS/DRX/DRR, ERP/ERS/ERX/ERR, SRP/SRS/SRX/SRR
-        source_prefix = {'DR', 'ER', 'SR'}
         type_suffices = {sra_runs_from_bioproject_accessions: 'P',
-                         sra_runs_from_biosample_accessions: 'S',
-                         sra_runs_from_sra_experiment_accessions: 'X',
-                         sra_runs_from_sra_run_accessions: 'R'}
+                            sra_runs_from_biosample_accessions: 'S',
+                            sra_runs_from_sra_experiment_accessions: 'X',
+                            sra_runs_from_sra_run_accessions: 'R'}
+        validators = construct_accession_validators(type_suffices)
 
-        for data_type, type_suffix in type_suffices.items():
-            # Generate regex
-            prefix_string = '|'.join(source_prefix)
-            sra_validator = re.compile(r'^(?:%s)%s[0-9]+$' % (prefix_string, type_suffix))
-
-            # Record
-            validators.append((data_type, sra_validator))
-
-        # PRJ and SAMN
-        bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
-        biosample_validator = re.compile(r'^SAMN[0-9]+$')
-
-        validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
-        validators.append((sra_runs_from_biosample_accessions, biosample_validator))
-
-        # Validate and sort accessions
-        validated_accessions = {k: list() for k in type_suffices.keys()}
-        for input_accession in input_accessions:
-            for accession_type, validator in validators:
-                if validator.match(input_accession):
-                    validated_accessions[accession_type].append(input_accession)
-                    break
-            else:
-                logging.error('Could not determine accession type for %s' % input_accession)
+        # Validate and sort input accessions
+        validated_accessions = validate_accessions(input_accessions, validators, type_suffices)
 
         # Init SraRun objects from sorted accessions using appropriate function
         for func, accessions in validated_accessions.items():
