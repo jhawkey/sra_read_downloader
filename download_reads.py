@@ -324,9 +324,15 @@ class SraExperiment(object):
         self.alias = experiment.attrib.get('alias')
         design = experiment.find('DESIGN')
         self.biosample_accession = None
-        for external_id in design.iter('EXTERNAL_ID'):
-            if external_id.attrib.get('namespace') == 'BioSample':
-                self.biosample_accession = external_id.text
+        sample = sra_experiment_xml.find('SAMPLE')
+        if sample is not None:
+            for external_id in sample.iter('EXTERNAL_ID'):
+                if external_id.attrib.get('namespace') == 'BioSample':
+                    self.biosample_accession = external_id.text
+        if self.biosample_accession is None:
+            for external_id in design.iter('EXTERNAL_ID'):
+                if external_id.attrib.get('namespace') == 'BioSample':
+                    self.biosample_accession = external_id.text
         library_descriptor = design.find('LIBRARY_DESCRIPTOR')
         self.library_name = library_descriptor.find('LIBRARY_NAME').text
         self.library_strategy = library_descriptor.find('LIBRARY_STRATEGY').text
@@ -542,12 +548,8 @@ def get_arguments():
 
     parser.add_argument('--accession_list', required=False, type=pathlib.Path,
                         help='File of accessions (one per line)')
-    parser.add_argument('--bioprojects', required=False, nargs='+',
-                        help='NCBI BioProject accessions')
-    parser.add_argument('--biosamples', required=False, nargs='+',
-                        help='NCBI BioSample accessions')
-    parser.add_argument('--sra', required=False, nargs='+',
-                        help='NCBI SRA accessions')
+    parser.add_argument('--accessions', required=False, type=str, nargs='+',
+                        help='NCBI accessions (BioProject, BioSample or SRA, separated by spaces)')
     parser.add_argument('--genome_trackr', required=False, type=str,
                         help='GenomeTrackr species')
     parser.add_argument('--logfile', default='download_reads.log',
@@ -596,23 +598,24 @@ def main():
     if args.date:
         validate(args.date)
 
-    ###
-    # Parse file with list of accession IDs
-    ###
+    input_accessions = set()
+    if args.accessions:
+        input_accessions |= set(args.accessions)
+        logging.info('Successfully read in %s accessions' % (str(len(args.accessions))))
     if args.accession_list:
-        # Get accessions
         logging.info('Reading in accession list file %s' % args.accession_list)
         with args.accession_list.open('r') as fh:
-            input_accessions = {line.rstrip() for line in fh}
+            input_accessions_from_file = {line.rstrip() for line in fh}
 
-        logging.info('Successfully read in %s accesions from file %s' % (str(len(input_accessions)), args.accession_list))
+        logging.info('Successfully read in %s accessions from file %s' % (str(len(input_accessions_from_file)), args.accession_list))
+        input_accessions |= input_accessions_from_file
 
-
+    if args.accessions or args.accession_list:
         # Construct validators
         type_suffices = {sra_runs_from_bioproject_accessions: 'P',
-                            sra_runs_from_biosample_accessions: 'S',
-                            sra_runs_from_sra_experiment_accessions: 'X',
-                            sra_runs_from_sra_run_accessions: 'R'}
+                         sra_runs_from_biosample_accessions: 'S',
+                         sra_runs_from_sra_experiment_accessions: 'X',
+                         sra_runs_from_sra_run_accessions: 'R'}
         validators = construct_accession_validators(type_suffices)
 
         # Validate and sort input accessions
@@ -620,25 +623,8 @@ def main():
 
         # Init SraRun objects from sorted accessions using appropriate function
         for func, accessions in validated_accessions.items():
-            sra_runs.extend(func(accessions))
-
-    ###
-    # Get SraRun objects from NCBI accessions
-    ###
-    if args.bioprojects:
-        sra_runs += sra_runs_from_bioproject_accessions(args.bioprojects)
-    if args.biosamples:
-        sra_runs += sra_runs_from_biosample_accessions(args.biosamples)
-    if args.sra:
-        sra_run_accessions = [x for x in args.sra if x[2] == 'R']
-        sra_experiment_accessions = [x for x in args.sra if x[2] == 'X']
-        sra_sample_accessions = [x for x in args.sra if x[2] == 'S']
-        if sra_run_accessions:
-            sra_runs += sra_runs_from_sra_run_accessions(sra_run_accessions)
-        if sra_experiment_accessions:
-            sra_runs += sra_runs_from_sra_experiment_accessions(sra_experiment_accessions)
-        if sra_sample_accessions:
-            sra_runs += sra_runs_from_sra_sample_accessions(sra_sample_accessions)
+            if accessions:
+                sra_runs.extend(func(accessions))
 
     ###
     # Locate accessions for all reads from a GenomeTrackr species
