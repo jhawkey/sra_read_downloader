@@ -489,16 +489,18 @@ def check_dataframe_status(data_frame):
         logging.error('GenomeTrackr table is empty, please check that any subsetting commands given are correct.')
 
 def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_value):
-    # login to FTP server
+    logging.info('Connecting to GenomeTrackr FTP server...')
     ftp = FTP('ftp-trace.ncbi.nih.gov')
     ftp.login()
     # move to the genometrackr folder
     ftp.cwd('pathogen/Results/' + species)
     # get list of directories in species folder and identify most recent
     # most recent folder will be PDG directory with biggest number
+    logging.info('Inspecting ' + species + ' directories...')
     dir_list = ftp.nlst()
     # intialise number to check against to see if we have biggest number
     check_num = 0
+    correct_dir = ''
     for directory in dir_list:
         if directory.startswith('PDG'):
             folder_num = int(directory.split('.')[1])
@@ -508,22 +510,25 @@ def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_valu
                 # save the name of directory for later
                 correct_dir = directory
     # navigate into this directory and the Metadata folder
+    logging.info('Most recent directory = ' + correct_dir)
     ftp.cwd(correct_dir + '/Metadata')
     # open a temp file to download to
-    genome_trackr_file = open(str(os.getpid()) + 'genome_trackr_temp.tsv', 'wb')
+    temp_tsv = 'genome_trackr_temp_' + str(os.getpid()) + '.tsv'
+    genome_trackr_file = open(temp_tsv, 'wb')
     # download tsv file
-    ftp.retrbinary('RETR ' + correct_dir + '.metadata.tsv', genome_trackr_file.write)
+    metadata_path = correct_dir + '.metadata.tsv'
+    logging.info('Downloading metadata file ' + metadata_path + ' to ' + temp_tsv + '...')
+    ftp.retrbinary('RETR ' + metadata_path, genome_trackr_file.write)
     # close the ftp connection and the genome trackr file
     ftp.close()
     genome_trackr_file.close()
 
-    #genome_trackr_table = pd.read_csv('genome_trackr_metadata_15082016.tsv', sep='\t')
-    logging.info('Reading in GenomeTrackr data for %s from genome_trackr_temp.tsv ...' % species)
-    genome_trackr_table = pd.read_csv('genome_trackr_temp.tsv', sep='\t')
+    logging.info('Reading in GenomeTrackr data for ' + species + ' from ' + temp_tsv + ' ...')
+    genome_trackr_table = pd.read_csv(temp_tsv, sep='\t')
     # if there's a date, extract any samples on or after that date
     if date:
-        logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % args.date)
-        genome_trackr_table = genome_trackr_table[genome_trackr_table['target_creation_date'] >= args.date]
+        logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % date)
+        genome_trackr_table = genome_trackr_table[genome_trackr_table['target_creation_date'] >= date]
         # check table not empty
         check_dataframe_status(genome_trackr_table)
 
@@ -531,13 +536,13 @@ def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_valu
         # extract only rows with column equaling value of interest
         ## TO DO: Make this more robust
         logging.info('Subsetting GenomeTrackr table on column %s with value of %s ...' % (genome_trackr_col, genome_trackr_col_value))
-        genome_trackr_table = geome_trackr_table[genome_trackr_table[genome_trackr_col] == genome_trackr_col_value]
+        genome_trackr_table = genome_trackr_table[genome_trackr_table[genome_trackr_col] == genome_trackr_col_value]
         # check table not empty
         check_dataframe_status(genome_trackr_table)
-    # get a list of all the biosample accessions for the entires of interest
+    # get a list of all the biosample accessions for the entries of interest
     genome_trackr_biosample_accessions = list(genome_trackr_table['biosample_acc'])
     logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' % str(len(genome_trackr_biosample_accessions)))
-    return(genome_trackr_biosample_accessions)
+    return genome_trackr_biosample_accessions
 
 ###
 # Argument parser
@@ -550,8 +555,6 @@ def get_arguments():
                         help='File of accessions (one per line)')
     parser.add_argument('--accessions', required=False, type=str, nargs='+',
                         help='NCBI accessions (BioProject, BioSample or SRA, separated by spaces)')
-    parser.add_argument('--genome_trackr', required=False, type=str,
-                        help='GenomeTrackr species')
     parser.add_argument('--logfile', default='download_reads.log',
                         help='Log file')
     parser.add_argument('--download_jobs', type=int, default=8,
@@ -631,9 +634,9 @@ def main():
     ###
     # Locate accessions for all reads from a GenomeTrackr species
     ###
-    if args.genome_trackr:
+    if args.species:
         # add to the list of sra objects for each biosample
-        sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, ars.date, args.genome_trackr_col, args.genome_trackr_col_value))
+        sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, args.date, args.genome_trackr_col, args.genome_trackr_col_value))
 
     # Use asyncio to download reads in parallel.
     loop = asyncio.get_event_loop()
