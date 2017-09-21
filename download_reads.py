@@ -601,13 +601,15 @@ def main():
     input_accessions = set()
     if args.accessions:
         input_accessions |= set(args.accessions)
-        logging.info('Successfully read in %s accessions' % (str(len(args.accessions))))
+        plural = '' if len(args.accessions) == 1 else 's'
+        logging.info('Successfully read in ' + str(len(args.accessions)) + ' accession' + plural)
     if args.accession_list:
         logging.info('Reading in accession list file %s' % args.accession_list)
         with args.accession_list.open('r') as fh:
             input_accessions_from_file = {line.rstrip() for line in fh}
 
-        logging.info('Successfully read in %s accessions from file %s' % (str(len(input_accessions_from_file)), args.accession_list))
+        plural = '' if len(input_accessions_from_file) == 1 else 's'
+        logging.info('Successfully read in ' + str(len(input_accessions_from_file)) + ' accession' + plural + ' from file ' + str(args.accession_list))
         input_accessions |= input_accessions_from_file
 
     if args.accessions or args.accession_list:
