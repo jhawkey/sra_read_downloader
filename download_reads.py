@@ -379,7 +379,8 @@ class SraRun(object):
         self.size = int(sra_run_xml.attrib.get('size'))
         self.published_date = sra_run_xml.attrib.get('published')
         statistics = sra_run_xml.find('Statistics')
-        self.read_file_count = int(statistics.attrib.get('nreads'))
+        #print(statistics.attrib.get('nreads'))
+        #self.read_file_count = int(statistics.attrib.get('nreads'))
         self.read_counts = []
         self.read_average_lengths = []
         self.read_stdevs = []
@@ -387,9 +388,9 @@ class SraRun(object):
             self.read_counts.append(int(read_file.attrib.get('count')))
             self.read_average_lengths.append(float(read_file.attrib.get('average')))
             self.read_stdevs.append(float(read_file.attrib.get('stdev')))
-        assert len(self.read_counts) == self.read_file_count
-        assert len(self.read_average_lengths) == self.read_file_count
-        assert len(self.read_stdevs) == self.read_file_count
+        #assert len(self.read_counts) == self.read_file_count
+        #assert len(self.read_average_lengths) == self.read_file_count
+        #assert len(self.read_stdevs) == self.read_file_count
 
         self.attempts = 0
         self.max_attempts = 3
@@ -449,7 +450,7 @@ class SraRun(object):
                 if not any(e in stderr.decode() for e in connection_errors):
                     break
 
-
+        '''
         # File renaming/ moving synchronous but this won't be an issue
         # ...unless we're somehow renaming/ moving files between filesystems
         file_renames = []
@@ -469,7 +470,7 @@ class SraRun(object):
         for old_name, new_name in file_renames:
             # Rename file
             os.rename(old_name, new_name)
-
+        '''
         # Release job count and return
         SraRun.running_downloads -= 1
 
