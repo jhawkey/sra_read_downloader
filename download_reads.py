@@ -11,6 +11,9 @@ import sys
 import urllib.request
 import xml.etree.ElementTree as ET
 import pandas as pd
+from holtlib import slurm_modules
+from holtlib import slurm_job
+import time
 
 # TODOS:
     # catch "ftplib.error_perm: 550 pathogen/Results/Eschericia_coli_Shigella: No such file or directory" in parse_genome_trackr
@@ -402,6 +405,27 @@ class SraRun(object):
     def get_filename_base(self):
         return self.sample.sra_sample_accession + '_' + self.accession
 
+    def download_task(self):
+        logging.info('Starting %s' % self.accession)
+        # Construct command
+        fastq_dump_template = 'fastq-dump --gzip %s'
+
+        fastq_dump_args = list()
+        if self.experiment.platform == 'ILLUMINA':
+            fastq_dump_args.append('--split-3')
+        fastq_dump_args.append('--readids')
+        fastq_dump_args.append(self.accession)
+
+        fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
+
+        download_job = slurm_job.SlurmJob(job_name=self.accession + '_download', partition='sysgen', time='0-02:00:00')
+        download_job.modules.append(slurm_modules.get_module('helix', 'sra'))
+        download_job.commands.append(fastq_dump_cmd)
+        download_job.submit_sbatch_job()
+        download_job.write_sbatch_script(self.accession + '_jobscript.sh')
+
+
+    '''
     async def download_task(self, simultaneous_downloads):
         # Wait until there are free job slots
         logging.info('Starting %s' % self.accession)
@@ -428,6 +452,8 @@ class SraRun(object):
 
             # Get a subprocess coroutine and execute
             logging.info('Downloading %s' % self.accession)
+
+
             process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
 
@@ -450,7 +476,7 @@ class SraRun(object):
                 if not any(e in stderr.decode() for e in connection_errors):
                     break
 
-        '''
+
         # File renaming/ moving synchronous but this won't be an issue
         # ...unless we're somehow renaming/ moving files between filesystems
         file_renames = []
@@ -470,10 +496,10 @@ class SraRun(object):
         for old_name, new_name in file_renames:
             # Rename file
             os.rename(old_name, new_name)
-        '''
+
         # Release job count and return
         SraRun.running_downloads -= 1
-
+        '''
 
 def validate(date_text):
     '''
@@ -641,12 +667,20 @@ def main():
         # add to the list of sra objects for each biosample
         sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, args.date, args.genome_trackr_col, args.genome_trackr_col_value))
 
+    # launch SLURM submission script for each run
+    for sra_run in sra_runs:
+        sra_run.download_task()
+        time.sleep(0.1)
+
+    '''
     # Use asyncio to download reads in parallel.
     loop = asyncio.get_event_loop()
     async_futures = asyncio.gather(*[x.download_task(args.download_jobs) for x in sra_runs])
+    print(async_futures)
     logging.info('Downloading reads...')
     loop.run_until_complete(async_futures)
     loop.close()
+    '''
 
     # Example of how to set up slurm job object
     '''
