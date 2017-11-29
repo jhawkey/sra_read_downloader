@@ -418,7 +418,7 @@ class SraRun(object):
 
         fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
 
-        download_job = slurm_job.SlurmJob(job_name=self.accession + '_download', partition='sysgen', time='0-01:00:00')
+        download_job = slurm_job.SlurmJob(job_name=self.accession + '_download', partition='sysgen', time='0-02:00:00')
         download_job.modules.append(slurm_modules.get_module('helix', 'sra'))
         download_job.commands.append(fastq_dump_cmd)
         download_job.submit_sbatch_job()
@@ -667,12 +667,17 @@ def main():
         # add to the list of sra objects for each biosample
         sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, args.date, args.genome_trackr_col, args.genome_trackr_col_value))
 
+    for sra_run in sra_runs:
+        master_list = open(sra_run.accession + '_master_list.csv', 'w')
+        sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
+        master_list.write(','.join(sra_accession_numbers) + '\n')
+        master_list.close()
     # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
-    with open('accession_master_list.csv', 'w') as master_list:
-        master_list.write('run_accession,exp_accession,biosample_accession,platform\n')
-        for sra_run in sra_runs:
-            sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
-            master_list.write(','.join(sra_accession_numbers) + '\n')
+    #with open('accession_master_list.csv', 'w') as master_list:
+    #    master_list.write('run_accession,exp_accession,biosample_accession,platform\n')
+#        for sra_run in sra_runs:
+#            sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
+#            master_list.write(','.join(sra_accession_numbers) + '\n')
     # launch SLURM submission script for each run
     for sra_run in sra_runs:
         sra_run.download_task()
