@@ -441,8 +441,11 @@ class SraRun(object):
             stdout, stderr = await process.communicate()
             returncode = process.returncode
 
-            # Check returncode
-            if returncode != 0:
+            # Check returncode; if we were successful break loop else attempt
+            # to rescue
+            if returncode == 0:
+                break
+            else:
                 # TODO: check if error is resulting from a connect error
                 # Example, don't retry if there was an issue other than a connection error:
                 connection_errors = [
