@@ -503,59 +503,65 @@ def check_dataframe_status(data_frame):
 
 def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_value):
     logging.info('Connecting to GenomeTrackr FTP server...')
-    ftp = FTP('ftp-trace.ncbi.nih.gov')
-    ftp.login()
-    # move to the genometrackr folder
-    ftp.cwd('pathogen/Results/' + species)
-    # get list of directories in species folder and identify most recent
-    # most recent folder will be PDG directory with biggest number
-    logging.info('Inspecting ' + species + ' directories...')
-    dir_list = ftp.nlst()
-    # intialise number to check against to see if we have biggest number
-    check_num = 0
-    correct_dir = ''
-    for directory in dir_list:
-        if directory.startswith('PDG'):
-            folder_num = int(directory.split('.')[1])
-            if folder_num > check_num:
-                # set check_num to be largest value we've seen
-                check_num = folder_num
-                # save the name of directory for later
-                correct_dir = directory
-    # navigate into this directory and the Metadata folder
-    logging.info('Most recent directory = ' + correct_dir)
-    ftp.cwd(correct_dir + '/Metadata')
-    # open a temp file to download to
-    temp_tsv = 'genome_trackr_temp_' + str(os.getpid()) + '.tsv'
-    genome_trackr_file = open(temp_tsv, 'wb')
-    # download tsv file
-    metadata_path = correct_dir + '.metadata.tsv'
-    logging.info('Downloading metadata file ' + metadata_path + ' to ' + temp_tsv + '...')
-    ftp.retrbinary('RETR ' + metadata_path, genome_trackr_file.write)
-    # close the ftp connection and the genome trackr file
-    ftp.close()
-    genome_trackr_file.close()
 
-    logging.info('Reading in GenomeTrackr data for ' + species + ' from ' + temp_tsv + ' ...')
-    genome_trackr_table = pd.read_csv(temp_tsv, sep='\t')
-    # if there's a date, extract any samples on or after that date
-    if date:
-        logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % date)
-        genome_trackr_table = genome_trackr_table[genome_trackr_table['target_creation_date'] >= date]
-        # check table not empty
-        check_dataframe_status(genome_trackr_table)
+    # Putting a try statement here as sometimes there are issues connecting to the FTP server
+    try:
+        ftp = FTP('ftp-trace.ncbi.nih.gov')
+        ftp.login()
+        # move to the genometrackr folder
+        ftp.cwd('pathogen/Results/' + species)
+        # get list of directories in species folder and identify most recent
+        # most recent folder will be PDG directory with biggest number
+        logging.info('Inspecting ' + species + ' directories...')
+        dir_list = ftp.nlst()
+        # intialise number to check against to see if we have biggest number
+        check_num = 0
+        correct_dir = ''
+        for directory in dir_list:
+            if directory.startswith('PDG'):
+                folder_num = int(directory.split('.')[1])
+                if folder_num > check_num:
+                    # set check_num to be largest value we've seen
+                    check_num = folder_num
+                    # save the name of directory for later
+                    correct_dir = directory
+        # navigate into this directory and the Metadata folder
+        logging.info('Most recent directory = ' + correct_dir)
+        ftp.cwd(correct_dir + '/Metadata')
+        # open a temp file to download to
+        temp_tsv = 'genome_trackr_temp_' + str(os.getpid()) + '.tsv'
+        genome_trackr_file = open(temp_tsv, 'wb')
+        # download tsv file
+        metadata_path = correct_dir + '.metadata.tsv'
+        logging.info('Downloading metadata file ' + metadata_path + ' to ' + temp_tsv + '...')
+        ftp.retrbinary('RETR ' + metadata_path, genome_trackr_file.write)
+        # close the ftp connection and the genome trackr file
+        ftp.close()
+        genome_trackr_file.close()
 
-    if genome_trackr_col:
-        # extract only rows with column equaling value of interest
-        ## TO DO: Make this more robust
-        logging.info('Subsetting GenomeTrackr table on column %s with value of %s ...' % (genome_trackr_col, genome_trackr_col_value))
-        genome_trackr_table = genome_trackr_table[genome_trackr_table[genome_trackr_col] == genome_trackr_col_value]
-        # check table not empty
-        check_dataframe_status(genome_trackr_table)
-    # get a list of all the biosample accessions for the entries of interest
-    genome_trackr_biosample_accessions = list(genome_trackr_table['biosample_acc'])
-    logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' % str(len(genome_trackr_biosample_accessions)))
-    return genome_trackr_biosample_accessions
+        logging.info('Reading in GenomeTrackr data for ' + species + ' from ' + temp_tsv + ' ...')
+        genome_trackr_table = pd.read_csv(temp_tsv, sep='\t')
+        # if there's a date, extract any samples on or after that date
+        if date:
+            logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % date)
+            genome_trackr_table = genome_trackr_table[genome_trackr_table['target_creation_date'] >= date]
+            # check table not empty
+            check_dataframe_status(genome_trackr_table)
+
+        if genome_trackr_col:
+            # extract only rows with column equaling value of interest
+            ## TO DO: Make this more robust
+            logging.info('Subsetting GenomeTrackr table on column %s with value of %s ...' % (genome_trackr_col, genome_trackr_col_value))
+            genome_trackr_table = genome_trackr_table[genome_trackr_table[genome_trackr_col] == genome_trackr_col_value]
+            # check table not empty
+            check_dataframe_status(genome_trackr_table)
+        # get a list of all the biosample accessions for the entries of interest
+        genome_trackr_biosample_accessions = list(genome_trackr_table['biosample_acc'])
+        logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' % str(len(genome_trackr_biosample_accessions)))
+        return genome_trackr_biosample_accessions
+
+    except OSError:
+        logging.info('Unable to connect to the GenomeTrackr FTP. You may want to try using a different computer/cluster or internet connection. Alternately, you can download the GenomeTrackr metadata file yourself from ftp-trace.ncbi.nih.gov/pathogen/Results/ and select your accessions of interest. These can then be passed to the script using --accession_list.')
 
 
 def initialize_logging_file(logfile):
