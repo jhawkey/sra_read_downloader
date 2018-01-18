@@ -9,6 +9,8 @@ import pathlib
 import re
 import sys
 import urllib.request
+import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 import pandas as pd
 from holtlib import slurm_modules
@@ -556,6 +558,46 @@ def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_valu
     logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' % str(len(genome_trackr_biosample_accessions)))
     return genome_trackr_biosample_accessions
 
+
+def initialize_logging_file(logfile):
+    logging.basicConfig(
+        filename=logfile,
+        level=logging.DEBUG,
+        filemode='w',                      # write to log file (will overwrite on subsequent runs)
+        format='%(asctime)s %(message)s')  # format the logfile
+
+    # Output log to stdout as well as log file.
+    root = logging.getLogger()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+    root.addHandler(handler)
+
+    logging.info('program started')
+    logging.info('command line: {0}'.format(' '.join(sys.argv)))  # print the terminal command
+
+
+def check_fastq_dump_version():
+    logging.info('Checking fastq-dump presence and version')
+    if shutil.which('fastq-dump') is None:
+        logging.error('Could not find fastq-dump')
+        sys.exit()
+    try:
+        version_string = subprocess.check_output(['fastq-dump', '--version']).decode().strip()
+        version_string = version_string.split(' : ')[1]
+    except (subprocess.CalledProcessError, IndexError):
+        logging.error('Could not parse "fastq-dump --version" output')
+        sys.exit()
+    current_url = 'https://ftp-trace.ncbi.nlm.nih.gov/sra/sdk/current/sratoolkit.current.version'
+    with urllib.request.urlopen(current_url) as current_version_response:
+        current_version = current_version_response.read().decode().strip()
+    if version_string != current_version:
+        logging.error('fastq-dump version (' + version_string +
+                      ') is not the current version (' + current_version + ')')
+        sys.exit()
+    logging.info('fastq-dump version (' + version_string + ') is good')
+
+
 ###
 # Argument parser
 ###
@@ -585,21 +627,9 @@ def main():
     ###
     # Initilization
     ###
-
-    # get arguments
     args = get_arguments()
-
-    # initialize logging file
-    logging.basicConfig(
-        filename=args.logfile, # name of log file
-        level=logging.DEBUG, # set logging level to debug
-        filemode='w', # write to log file (so will overwrite on subsequent runs)
-        format='%(asctime)s %(message)s', # format the logfile
-        datefmt='%m/%d/%Y %H:%M:%S') # format the date and time
-    logging.info('program started')
-    logging.info('command line: {0}'.format(' '.join(sys.argv))) # print the command sent to the command line
-
-    # list of SRA runs
+    initialize_logging_file(args.logfile)
+    check_fastq_dump_version()
     sra_runs = []
 
     # key: accession, value: reason for failure
