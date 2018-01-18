@@ -18,7 +18,6 @@ from holtlib import slurm_job
 import time
 
 # TODOS:
-    # Ensure that fastq-dump is installed
     # catch "ftplib.error_perm: 550 pathogen/Results/Eschericia_coli_Shigella: No such file or directory" in parse_genome_trackr
     # catch "TimeoutError: [Errno 60] Operation timed out" in parse_genome_trackr
 
