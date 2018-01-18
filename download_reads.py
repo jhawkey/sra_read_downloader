@@ -16,6 +16,7 @@ from holtlib import slurm_job
 import time
 
 # TODOS:
+    # Ensure that fastq-dump is installed
     # catch "ftplib.error_perm: 550 pathogen/Results/Eschericia_coli_Shigella: No such file or directory" in parse_genome_trackr
     # catch "TimeoutError: [Errno 60] Operation timed out" in parse_genome_trackr
 
@@ -405,27 +406,6 @@ class SraRun(object):
     def get_filename_base(self):
         return self.sample.sra_sample_accession + '_' + self.accession
 
-    def download_task(self):
-        logging.info('Starting %s' % self.accession)
-        # Construct command
-        fastq_dump_template = 'fastq-dump --gzip %s'
-
-        fastq_dump_args = list()
-        if self.experiment.platform == 'ILLUMINA':
-            fastq_dump_args.append('--split-3')
-        fastq_dump_args.append('--readids')
-        fastq_dump_args.append(self.accession)
-
-        fastq_dump_cmd = fastq_dump_template % ' '.join(fastq_dump_args)
-
-        download_job = slurm_job.SlurmJob(job_name=self.accession + '_download', partition='sysgen', time='0-02:00:00')
-        download_job.modules.append(slurm_modules.get_module('helix', 'sra'))
-        download_job.commands.append(fastq_dump_cmd)
-        download_job.submit_sbatch_job()
-        download_job.write_sbatch_script(self.accession + '_jobscript.sh')
-
-
-    '''
     async def download_task(self, simultaneous_downloads):
         # Wait until there are free job slots
         logging.info('Starting %s' % self.accession)
@@ -499,7 +479,7 @@ class SraRun(object):
 
         # Release job count and return
         SraRun.running_downloads -= 1
-        '''
+
 
 def validate(date_text):
     '''
@@ -679,36 +659,13 @@ def main():
 #            sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
 #            master_list.write(','.join(sra_accession_numbers) + '\n')
     # launch SLURM submission script for each run
-    for sra_run in sra_runs:
-        sra_run.download_task()
-        time.sleep(0.1)
 
-    '''
     # Use asyncio to download reads in parallel.
     loop = asyncio.get_event_loop()
     async_futures = asyncio.gather(*[x.download_task(args.download_jobs) for x in sra_runs])
-    print(async_futures)
     logging.info('Downloading reads...')
     loop.run_until_complete(async_futures)
     loop.close()
-    '''
-
-    # Example of how to set up slurm job object
-    '''
-    # initalize job
-    new_job = slurm_job.SlurmJob(job_name=NAME, partition='sysgen', time='0-01:00:00')
-    # set up modules
-    modules = []
-    for module in modules:
-        new_job.modules.append(slurm_modules.get_module('helix', module))
-    # add commands
-    new_job.commands.append(download_read)
-    new_job.commands.append(remove_sra_file)
-
-    # run job and write out script
-    new_job.submit_sbatch_job()
-    new_job.write_sbatch_script(reference.stem + '_jobscript.sh')
-    '''
 
     ###
     # Clean up and write output files
