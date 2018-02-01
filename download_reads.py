@@ -303,22 +303,19 @@ class BioSample(object):
         illumina_runs = sorted(illumina_runs, key=lambda x: x.published_date, reverse=True)
         long_read_runs = sorted(long_read_runs, key=lambda x: x.published_date, reverse=True)
 
+        # If the user asked for SRA accessions explicitly, then give the exact ones they asked for.
+        if sra_accs is not None:
+            all_runs = illumina_runs + long_read_runs + other_runs
+            return [r for r in all_runs if r.accession in sra_accs]
+
         if illumina_runs:
+            runs.append(illumina_runs[0])
             if len(illumina_runs) > 1:
-                if sra_accs is None:
-                    self.warnings.append(get_multiple_run_warning(illumina_runs, 'Illumina', self))
-                    runs.append(illumina_runs[0])
-                else:
-                    runs += [r for r in illumina_runs if r.accession in sra_accs]
-
+                self.warnings.append(get_multiple_run_warning(illumina_runs, 'Illumina', self))
         if long_read_runs:
+            runs.append(long_read_runs[0])
             if len(long_read_runs) > 1:
-                if sra_accs is None:
-                    self.warnings.append(get_multiple_run_warning(long_read_runs, 'long read', self))
-                    runs.append(long_read_runs[0])
-                else:
-                    runs += [r for r in long_read_runs if r.accession in sra_accs]
-
+                self.warnings.append(get_multiple_run_warning(long_read_runs, 'long read', self))
         if other_runs:
             self.warnings.append('There were runs associated with sample ' + self.accession +
                                  ' which were neither Illumina reads nor long reads. They were '
