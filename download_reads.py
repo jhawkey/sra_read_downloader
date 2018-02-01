@@ -399,6 +399,7 @@ class SraRun(object):
 
         self.attempts = 0
         self.max_attempts = 3
+        self.output_fps = list()
 
     def __repr__(self):
         return self.sample.sra_sample_accession + '_' + \
@@ -477,8 +478,9 @@ class SraRun(object):
             file_renames.append((old_name, new_name))
 
         for old_name, new_name in file_renames:
-            # Rename file
+            # Rename files and update final filepaths
             os.rename(old_name, new_name)
+            self.output_fps.append(new_name)
 
         # Release job count and return
         SraRun.running_downloads -= 1
