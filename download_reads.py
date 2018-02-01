@@ -257,7 +257,6 @@ class BioSample(object):
         self.illumina_experiments = []
         self.long_read_experiments = []
         self.other_experiments = []
-        self.warnings = []
 
     def __repr__(self):
         biosample_repr = str(self.accession) + ' (' + self.taxonomy_name
@@ -311,15 +310,15 @@ class BioSample(object):
         if illumina_runs:
             runs.append(illumina_runs[0])
             if len(illumina_runs) > 1:
-                self.warnings.append(get_multiple_run_warning(illumina_runs, 'Illumina', self))
+                logging.warning(get_multiple_run_warning(illumina_runs, 'Illumina', self))
         if long_read_runs:
             runs.append(long_read_runs[0])
             if len(long_read_runs) > 1:
-                self.warnings.append(get_multiple_run_warning(long_read_runs, 'long read', self))
+                logging.warning(get_multiple_run_warning(long_read_runs, 'long read', self))
         if other_runs:
-            self.warnings.append('There were runs associated with sample ' + self.accession +
-                                 ' which were neither Illumina reads nor long reads. They were '
-                                 'ignored: ' + ', '.join(x.accession for x in other_runs))
+            logging.warning('There were runs associated with sample ' + self.accession + ' which '
+                            'were neither Illumina reads nor long reads. They were ignored: ' +
+                            ', '.join(x.accession for x in other_runs))
         return runs
 
 
