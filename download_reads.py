@@ -494,7 +494,7 @@ def validate(date_text):
     try:
         datetime.datetime.strptime(date_text, '%Y-%m-%d')
     except ValueError:
-        logging.error('Date supplied (%s) for GenomeTrackr is in inccorrect format, should be YYYY-MM-DD.' % args.date)
+        logging.error('Date supplied (%s) for GenomeTrackr is in inccorrect format, should be YYYY-MM-DD.' % date_text)
         raise ValueError("Incorrect data format, should be YYYY-MM-DD")
 
 
