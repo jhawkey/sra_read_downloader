@@ -407,15 +407,15 @@ class SraRun(object):
                self.accession + '_' + self.experiment.platform
 
     def get_filename_base(self):
-        return self.sample.sra_sample_accession + '_' + self.accession
+        return self.sample.accession + '_' + self.accession
 
     def rename_output(self):
         file_renames = []
         if self.experiment.platform == 'ILLUMINA':
             old_name_1 = self.accession + '_1.fastq.gz'
             old_name_2 = self.accession + '_2.fastq.gz'
-            new_name_1 = '%s_%s_1.fastq.gz' % (self.sample.accession, self.get_filename_base())
-            new_name_2 = '%s_%s_2.fastq.gz' % (self.sample.accession, self.get_filename_base())
+            new_name_1 = '%s_%s_1.fastq.gz' % self.get_filename_base()
+            new_name_2 = '%s_%s_2.fastq.gz' % self.get_filename_base()
             file_renames.append((old_name_1, new_name_1))
             file_renames.append((old_name_2, new_name_2))
         else:
