@@ -51,7 +51,7 @@ def sra_runs_from_sra_accessions(sra_accs):
     biosample_uids = biosample_uids_from_sra_run_uids(sra_run_uids)
     biosamples = biosamples_from_biosample_uids(biosample_uids)
     for biosample in biosamples:
-        sra_runs += biosample.get_sra_runs()
+        sra_runs += biosample.get_sra_runs(sra_accs)
     return sra_runs
 
 
@@ -190,7 +190,7 @@ def get_sra_run_accession_for_biosamples(biosamples):
     return sra_run_accessions, sra_run_to_sample_dict, sra_run_warnings
 
 
-def get_multiple_run_warning_message(runs, run_type, biosample):
+def get_multiple_run_warning(runs, run_type, biosample):
     return 'There were multiple ' + run_type + ' runs for sample ' + biosample.accession + \
            '. Only the most recent (' + runs[0].accession + ') was downloaded. These ' \
            'additional runs were ignored: ' + ', '.join(x.accession for x in runs[1:])
@@ -282,7 +282,7 @@ class BioSample(object):
         for run in runs:
             run.sample = self
 
-    def get_sra_runs(self):
+    def get_sra_runs(self, sra_accs=None):
         """
         This function returns the SRA run accessions for this BioSample. It will include both
         Illumina and long read SRA runs. If there are multiple runs in a category (e.g. more than
@@ -304,18 +304,20 @@ class BioSample(object):
         long_read_runs = sorted(long_read_runs, key=lambda x: x.published_date, reverse=True)
 
         if illumina_runs:
-            illumina_run = illumina_runs[0]
             if len(illumina_runs) > 1:
-                self.warnings.append(get_multiple_run_warning_message(illumina_runs, 'Illumina',
-                                                                      self))
-            runs.append(illumina_run)
+                if sra_accs is None:
+                    self.warnings.append(get_multiple_run_warning(illumina_runs, 'Illumina', self))
+                    runs.append(illumina_runs[0])
+                else:
+                    runs += [r for r in illumina_runs if r.accession in sra_accs]
 
         if long_read_runs:
-            long_read_run = long_read_runs[0]
-            runs.append(long_read_run)
             if len(long_read_runs) > 1:
-                self.warnings.append(get_multiple_run_warning_message(illumina_runs, 'long read',
-                                                                      self))
+                if sra_accs is None:
+                    self.warnings.append(get_multiple_run_warning(long_read_runs, 'long read', self))
+                    runs.append(long_read_runs[0])
+                else:
+                    runs += [r for r in long_read_runs if r.accession in sra_accs]
 
         if other_runs:
             self.warnings.append('There were runs associated with sample ' + self.accession +
