@@ -468,8 +468,8 @@ class SraRun(object):
         if self.experiment.platform == 'ILLUMINA':
             old_name_1 = self.accession + '_1.fastq.gz'
             old_name_2 = self.accession + '_2.fastq.gz'
-            new_name_1 = '%s_%s_1.fastq.gz' % (self.sample, self.get_filename_base())
-            new_name_2 = '%s_%s_2.fastq.gz' % (self.sample, self.get_filename_base())
+            new_name_1 = '%s_%s_1.fastq.gz' % (self.sample.accession, self.get_filename_base())
+            new_name_2 = '%s_%s_2.fastq.gz' % (self.sample.accession, self.get_filename_base())
             file_renames.append((old_name_1, new_name_1))
             file_renames.append((old_name_2, new_name_2))
         else:
@@ -696,11 +696,11 @@ def main():
 
     # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
     with open('accession_master_list.csv', 'w') as master_list:
-        master_list.write('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform')
+        master_list.write('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform', 'file_locations')
         for sra_run in sra_runs:
             # check the file exists, only place here if it exists
             if len(sra_run.output_fps) > 1:
-                sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform]
+                sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform, sra_run.output_fps]
                 master_list.write(','.join(sra_accession_numbers) + '\n')
             else:
                 # oh no it broke!
