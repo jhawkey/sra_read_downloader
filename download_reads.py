@@ -702,7 +702,7 @@ def main():
 
     # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
     with open('accession_master_list.csv', 'w') as master_list:
-        head = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform')
+        header = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform')
         print(*header, sep='\t', file=master_list)
         # Write out some data associated with each accession and any error(s)
         for sra_run in sra_runs:
@@ -722,7 +722,6 @@ def main():
     #   were not downloaded, as well as the read set that was downloaded (and whether these read
     #   sets are Illumina or long, etc)
     # - a file of all successfully downloaded accessions and their locations
-
 
 if __name__ == '__main__':
     main()
