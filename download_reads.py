@@ -479,6 +479,7 @@ class SraRun(object):
                     'item not found while constructing within virtual database module'
                     ]
                 if not any(e in stderr.decode() for e in connection_errors):
+                    self.error = 'fastq-dump error: %s' % stderr.decode()
                     break
 
 
