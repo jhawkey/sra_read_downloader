@@ -716,29 +716,20 @@ def main():
     loop.run_until_complete(async_futures)
     loop.close()
 
-    # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
+    ###
+    # Write output files
+    ###
+
     with open('accession_master_list.csv', 'w') as master_list:
-        head = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform')
+        header = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform', 'file_locations')
         print(*header, sep='\t', file=master_list)
         # Write out some data associated with each accession and any error(s)
         for sra_run in sra_runs:
             if sra_run.error:
                 logging.info('Error downloading %s: %s', sra_run.accession, sra_run.error)
             else:
-                data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform)
+                data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform, ' '.join(sra_run.output_fps))
                 print(*data, sep='\t', file=master_list)
-
-    ###
-    # Clean up and write output files
-    ###
-
-    # To consider:
-    # - a file containing all failed accessions with their reasons for failure
-    # - a file containing all SAMPLES with multiple READ SETS and the IDs of the read sets that
-    #   were not downloaded, as well as the read set that was downloaded (and whether these read
-    #   sets are Illumina or long, etc)
-    # - a file of all successfully downloaded accessions and their locations
-
 
 if __name__ == '__main__':
     main()
