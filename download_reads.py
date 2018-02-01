@@ -1,4 +1,24 @@
 #!/usr/bin/env python3
+"""
+Read downloading script!
+
+TO DO:
+* catch "ftplib.error_perm: 550 pathogen/Results/Eschericia_coli_Shigella:
+  No such file or directory" in parse_genome_trackr
+* catch "TimeoutError: [Errno 60] Operation timed out" in parse_genome_trackr
+* Lots of unit tests. Especially for weird cases, like BioSamples with multiple read sets.
+* Option to name reads with SRR ID only
+* Option to download all of a BioSample's reads (if there are multiple read sets of the same type)
+* Summary at the end of the output:
+    * Number of successful downloads
+    * Failed downloads (and what they are)
+    * Sample-level warnings, like when a read set was ignored for a more recent alternative
+* Handle unpaired Illumina read sets
+* Handle three-file Illumina read set (1, 2 and unpaired)
+* Make a setup.py file so it's pip-installable
+* Make a nice README
+"""
+
 import argparse
 import asyncio
 import datetime
@@ -16,10 +36,6 @@ import pandas as pd
 from holtlib import slurm_modules
 from holtlib import slurm_job
 import time
-
-# TODOS:
-    # catch "ftplib.error_perm: 550 pathogen/Results/Eschericia_coli_Shigella: No such file or directory" in parse_genome_trackr
-    # catch "TimeoutError: [Errno 60] Operation timed out" in parse_genome_trackr
 
 
 class BadAccession(Exception):
