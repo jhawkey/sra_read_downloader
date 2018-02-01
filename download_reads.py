@@ -686,18 +686,6 @@ def main():
         # add to the list of sra objects for each biosample
         sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, args.date, args.genome_trackr_col, args.genome_trackr_col_value))
 
-    for sra_run in sra_runs:
-        master_list = open(sra_run.accession + '_master_list.csv', 'w')
-        sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
-        master_list.write(','.join(sra_accession_numbers) + '\n')
-        master_list.close()
-    # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
-    #with open('accession_master_list.csv', 'w') as master_list:
-    #    master_list.write('run_accession,exp_accession,biosample_accession,platform\n')
-#        for sra_run in sra_runs:
-#            sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
-#            master_list.write(','.join(sra_accession_numbers) + '\n')
-    # launch SLURM submission script for each run
 
     # Use asyncio to download reads in parallel.
     loop = asyncio.get_event_loop()
@@ -705,6 +693,18 @@ def main():
     logging.info('Downloading reads...')
     loop.run_until_complete(async_futures)
     loop.close()
+
+    # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
+    with open('accession_master_list.csv', 'w') as master_list:
+        master_list.write('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform')
+        for sra_run in sra_runs:
+            # check the file exists, only place here if it exists
+            if len(sra_run.output_fps) > 1:
+                sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform]
+                master_list.write(','.join(sra_accession_numbers) + '\n')
+            else:
+                # oh no it broke!
+                pass
 
     ###
     # Clean up and write output files
