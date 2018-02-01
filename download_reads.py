@@ -700,6 +700,10 @@ def main():
     loop.run_until_complete(async_futures)
     loop.close()
 
+    ###
+    # Write output files
+    ###
+
     with open('accession_master_list.csv', 'w') as master_list:
         header = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform', 'file_locations')
         print(*header, sep='\t', file=master_list)
@@ -710,17 +714,6 @@ def main():
             else:
                 data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform, ' '.join(sra_run.output_fps))
                 print(*data, sep='\t', file=master_list)
-
-    ###
-    # Clean up and write output files
-    ###
-
-    # To consider:
-    # - a file containing all failed accessions with their reasons for failure
-    # - a file containing all SAMPLES with multiple READ SETS and the IDs of the read sets that
-    #   were not downloaded, as well as the read set that was downloaded (and whether these read
-    #   sets are Illumina or long, etc)
-    # - a file of all successfully downloaded accessions and their locations
 
 if __name__ == '__main__':
     main()
