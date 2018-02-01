@@ -376,6 +376,7 @@ class SraRun(object):
         self.sample = None
         self.experiment = None
         self.warnings = []
+        self.error = None
         self.alias = sra_run_xml.attrib.get('alias')
         self.total_spots = int(sra_run_xml.attrib.get('total_spots'))
         self.total_bases = int(sra_run_xml.attrib.get('total_bases'))
@@ -397,13 +398,33 @@ class SraRun(object):
 
         self.attempts = 0
         self.max_attempts = 3
+        self.output_fps = list()
 
     def __repr__(self):
         return self.sample.sra_sample_accession + '_' + \
                self.accession + '_' + self.experiment.platform
 
     def get_filename_base(self):
-        return self.sample.sra_sample_accession + '_' + self.accession
+        return self.sample.accession + '_' + self.accession
+
+    def rename_output(self):
+        file_renames = []
+        if self.experiment.platform == 'ILLUMINA':
+            old_name_1 = self.accession + '_1.fastq.gz'
+            old_name_2 = self.accession + '_2.fastq.gz'
+            new_name_1 = '%s_1.fastq.gz' % self.get_filename_base()
+            new_name_2 = '%s_2.fastq.gz' % self.get_filename_base()
+            file_renames.append((old_name_1, new_name_1))
+            file_renames.append((old_name_2, new_name_2))
+        else:
+            old_name = self.accession + '.fastq.gz'
+            new_name = '%s_%s_%s.fastq.gz' % (self.sample.accession, self.accession, self.experiment.get_platform_short())
+            file_renames.append((old_name, new_name))
+
+        for old_name, new_name in file_renames:
+            # Rename files and update final filepaths
+            os.rename(old_name, new_name)
+            self.output_fps.append(new_name)
 
     async def download_task(self, simultaneous_downloads):
         # Wait until there are free job slots
@@ -456,28 +477,16 @@ class SraRun(object):
                     'item not found while constructing within virtual database module'
                     ]
                 if not any(e in stderr.decode() for e in connection_errors):
+                    self.error = 'fastq-dump error: %s' % stderr.decode()
                     break
 
 
         # File renaming/ moving synchronous but this won't be an issue
         # ...unless we're somehow renaming/ moving files between filesystems
-        file_renames = []
-        if self.experiment.platform == 'ILLUMINA':
-            old_name_1 = self.accession + '_1.fastq.gz'
-            old_name_2 = self.accession + '_2.fastq.gz'
-            new_name_1 = self.get_filename_base() + '_1.fastq.gz'
-            new_name_2 = self.get_filename_base() + '_2.fastq.gz'
-            file_renames.append((old_name_1, new_name_1))
-            file_renames.append((old_name_2, new_name_2))
-        else:
-            old_name = self.accession + '.fastq.gz'
-            new_name = (self.get_filename_base() + '_' + self.experiment.get_platform_short() +
-                        '.fastq.gz')
-            file_renames.append((old_name, new_name))
-
-        for old_name, new_name in file_renames:
-            # Rename file
-            os.rename(old_name, new_name)
+        try:
+            self.rename_output()
+        except OSError as e:
+            self.error = 'Unable to move file (%s)' % e
 
         # Release job count and return
         SraRun.running_downloads -= 1
@@ -683,18 +692,6 @@ def main():
         # add to the list of sra objects for each biosample
         sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, args.date, args.genome_trackr_col, args.genome_trackr_col_value))
 
-    for sra_run in sra_runs:
-        master_list = open(sra_run.accession + '_master_list.csv', 'w')
-        sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
-        master_list.write(','.join(sra_accession_numbers) + '\n')
-        master_list.close()
-    # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
-    #with open('accession_master_list.csv', 'w') as master_list:
-    #    master_list.write('run_accession,exp_accession,biosample_accession,platform\n')
-#        for sra_run in sra_runs:
-#            sra_accession_numbers = [sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.platform]
-#            master_list.write(','.join(sra_accession_numbers) + '\n')
-    # launch SLURM submission script for each run
 
     # Use asyncio to download reads in parallel.
     loop = asyncio.get_event_loop()
@@ -702,6 +699,18 @@ def main():
     logging.info('Downloading reads...')
     loop.run_until_complete(async_futures)
     loop.close()
+
+    # TODO: Should check if experiment is actually RNA sequencing, not DNA, at least put this in the output file
+    with open('accession_master_list.csv', 'w') as master_list:
+        head = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform')
+        print(*header, sep='\t', file=master_list)
+        # Write out some data associated with each accession and any error(s)
+        for sra_run in sra_runs:
+            if sra_run.error:
+                logging.info('Error downloading %s: %s', sra_run.accession, sra_run.error)
+            else:
+                data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform)
+                print(*data, sep='\t', file=master_list)
 
     ###
     # Clean up and write output files
