@@ -29,6 +29,10 @@ TO DO:
 * Handle three-file Illumina read set (1, 2 and unpaired)
 * Make a setup.py file so it's pip-installable
 * Make a nice README
+* Functions which make NCBI eutils calls should probably do things in chunks (e.g. 1000 at a time)
+  to make sure they work for very large sets.
+  Relevant functions: biosample_uids_from_bioproject_uids, biosample_uids_from_sra_run_uids,
+  biosamples_from_biosample_uids, sra_experiments_from_sra_experiment_uids
 """
 
 import argparse
@@ -45,9 +49,116 @@ import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 import pandas as pd
-import time
 
 __version__ = '0.1.0'
+
+
+def get_arguments():
+    parser = argparse.ArgumentParser(description='Download reads from NCBI')
+    parser.add_argument('--version', action='version',
+                        version='SRA Read Downloader v' + __version__,
+                        help="Show Kaptive's version number and exit")
+    parser.add_argument('--accession_list', required=False, type=pathlib.Path,
+                        help='File of accessions (one per line)')
+    parser.add_argument('--accessions', required=False, type=str, nargs='+',
+                        help='NCBI accessions (BioProject, BioSample or SRA, separated by spaces)')
+    parser.add_argument('--logfile', default='download_reads.log',
+                        help='Log file')
+    parser.add_argument('--download_jobs', type=int, default=8,
+                        help='Number of simultaneous downloads to run at once')
+    parser.add_argument('--species', required=False, type=str,
+                        help='Species from GenomeTrackr. Must be one of the following: '
+                             'Acinetobacter, Campylobacter, Citrobacter_freundii, '
+                             'Elizabethkingia, Enterobacter, Escherichia_coli_Shigella, '
+                             'Klebsiella, Klebsiella_oxytoca, Kluyvera_intermedia, '
+                             'Legionella_pneumophila, Listeria, Morganella, '
+                             'Mycobacterium_tuberculosis, Neisseria, Providencia, '
+                             'Pseudomonas_aeruginosa, Salmonella, Serratia, '
+                             'Staphylococcus_pseudintermedius, Vibrio_parahaemolyticus')
+    parser.add_argument('--date', required=False, type=str,
+                        help='Only required when downloading reads from GenomeTrackr. Will only '
+                             'download reads uploaded on or after the date specified in this '
+                             'argument. The corresponding column in the GenomeTrackr table is '
+                             '"target_creation_date". Date MUST be in the following format: '
+                             'YYYY-MM-DD.')
+    parser.add_argument('--genome_trackr_col', required=False, type=str,
+                        help='Name of column in GenomeTrackr table which will be used to select '
+                             'only rows which equal a particular value - this value can be set '
+                             'with --genome_trackr_col_value.')
+    parser.add_argument('--genome_trackr_col_value', required=False, type=str,
+                        help='Value in column of GenomeTrackr to use to select specific rows. '
+                             'Column name can be set with --genome_trackr_col.')
+    # TO DO: ensure that input files exist if specified
+    return parser.parse_args()
+
+
+def main():
+    args = get_arguments()
+    initialize_logging_file(args.logfile)
+    check_fastq_dump_version()
+    sra_runs = []
+    
+    if args.date:
+        validate_date_format(args.date)
+
+    input_accessions = set()
+    if args.accessions:
+        input_accessions |= set(args.accessions)
+        plural = '' if len(args.accessions) == 1 else 's'
+        logging.info('Successfully read in ' + str(len(args.accessions)) + ' accession' + plural)
+    if args.accession_list:
+        logging.info('Reading in accession list file %s' % args.accession_list)
+        with args.accession_list.open('r') as fh:
+            input_accessions_from_file = {line.rstrip() for line in fh}
+
+        plural = '' if len(input_accessions_from_file) == 1 else 's'
+        logging.info('Successfully read in ' + str(len(input_accessions_from_file)) +
+                     ' accession' + plural + ' from file ' + str(args.accession_list))
+        input_accessions |= input_accessions_from_file
+
+    if args.accessions or args.accession_list:
+        # Construct validators
+        type_suffices = {sra_runs_from_bioproject_accessions: 'P',
+                         sra_runs_from_biosample_accessions: 'S',
+                         sra_runs_from_sra_experiment_accessions: 'X',
+                         sra_runs_from_sra_run_accessions: 'R'}
+        validators = construct_accession_validators(type_suffices)
+
+        # Validate and sort input accessions
+        validated_accessions = validate_accessions(input_accessions, validators, type_suffices)
+
+        # Init SraRun objects from sorted accessions using appropriate function
+        for func, accessions in validated_accessions.items():
+            if accessions:
+                sra_runs.extend(func(accessions))
+
+    # Locate accessions for all reads from a GenomeTrackr species
+    if args.species:
+        biosample_accessions = parse_genome_trackr(args.species, args.date, args.genome_trackr_col,
+                                                   args.genome_trackr_col_value)
+        sra_runs += sra_runs_from_biosample_accessions(biosample_accessions)
+
+    # Use asyncio to download reads in parallel.
+    loop = asyncio.get_event_loop()
+    async_futures = asyncio.gather(*[x.download_task(args.download_jobs) for x in sra_runs])
+    logging.info('Downloading reads...')
+    loop.run_until_complete(async_futures)
+    loop.close()
+
+    # Write output files
+    with open('accession_master_list.csv', 'w') as master_list:
+        header = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source',
+                  'seq_platform', 'file_locations')
+        master_list.write('\t'.join(header))
+        # Write out some data associated with each accession and any error(s)
+        for sra_run in sra_runs:
+            if sra_run.error:
+                logging.info('Error downloading %s: %s', sra_run.accession, sra_run.error)
+            else:
+                data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession,
+                        sra_run.experiment.library_source, sra_run.experiment.platform,
+                        ' '.join(sra_run.output_fps))
+                master_list.write('\t'.join(data))
 
 
 class BadAccession(Exception):
@@ -105,7 +216,8 @@ def uids_from_accession(accessions, database):
     if not isinstance(accessions, list):
         accessions = [accessions]
     # Format URL
-    esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=%s&term=%s'
+    esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/' \
+                           'esearch.fcgi?db=%s&term=%s'
     esearch_url = esearch_template_url % (database, '+OR+'.join(accessions))
 
     # Make GET request
@@ -119,8 +231,6 @@ def uids_from_accession(accessions, database):
 
 
 def biosample_uids_from_bioproject_uids(bioproject_uids):
-    # TO DO: if there are too many BioProject UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
-
     elink_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi' + \
                 '?dbfrom=bioproject&db=biosample&id=' + ','.join(bioproject_uids)
     with urllib.request.urlopen(elink_url) as elink_response:
@@ -133,8 +243,6 @@ def biosample_uids_from_bioproject_uids(bioproject_uids):
 
 
 def biosample_uids_from_sra_run_uids(sra_run_uids):
-    # TO DO: if there are too many SRA run UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
-
     elink_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi' + \
                 '?dbfrom=sra&db=biosample&id=' + ','.join(sra_run_uids)
     with urllib.request.urlopen(elink_url) as elink_response:
@@ -147,8 +255,6 @@ def biosample_uids_from_sra_run_uids(sra_run_uids):
 
 
 def biosamples_from_biosample_uids(biosample_uids):
-    # TO DO: if there are too many BioSample UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
-
     # First we build the BioSamples.
     biosamples = []
     efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
@@ -193,8 +299,6 @@ def biosamples_from_biosample_uids(biosample_uids):
 
 
 def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
-    # TO DO: if there are too many SRA UIDs, we should probably do the following stuff in chunks (e.g. 1000 at a time).
-
     efetch_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi' + \
                     '?dbfrom=sra&db=sra&id=' + ','.join(sra_experiment_uids)
     sra_experiments = []
@@ -520,7 +624,7 @@ class SraRun(object):
         SraRun.running_downloads -= 1
 
 
-def validate(date_text):
+def validate_date_format(date_text):
     '''
     Check that date specified to script is valid
     '''
@@ -535,6 +639,7 @@ def validate(date_text):
 def check_dataframe_status(data_frame):
     if data_frame.empty:
         logging.error('GenomeTrackr table is empty, please check that any subsetting commands given are correct.')
+
 
 def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_value):
     logging.info('Connecting to GenomeTrackr FTP server...')
@@ -636,114 +741,6 @@ def check_fastq_dump_version():
                       ') is not the current version (' + current_version + ')')
         sys.exit()
     logging.info('fastq-dump version (' + version_string + ') is good')
-
-
-###
-# Argument parser
-###
-def get_arguments():
-
-    parser = argparse.ArgumentParser(description='Download reads from NCBI')
-    parser.add_argument('--version', action='version',
-                        version='SRA Read Downloader v' + __version__,
-                        help="Show Kaptive's version number and exit")
-    parser.add_argument('--accession_list', required=False, type=pathlib.Path,
-                        help='File of accessions (one per line)')
-    parser.add_argument('--accessions', required=False, type=str, nargs='+',
-                        help='NCBI accessions (BioProject, BioSample or SRA, separated by spaces)')
-    parser.add_argument('--logfile', default='download_reads.log',
-                        help='Log file')
-    parser.add_argument('--download_jobs', type=int, default=8,
-                        help='Number of simultaneous downloads to run at once')
-    parser.add_argument('--species', required=False, type=str, help='Species from GenomeTrackr. Must be one of the following: Acinetobacter, Campylobacter, Citrobacter_freundii, Elizabethkingia, Enterobacter, Escherichia_coli_Shigella, Klebsiella, Klebsiella_oxytoca, Kluyvera_intermedia, Legionella_pneumophila, Listeria, Morganella, Mycobacterium_tuberculosis, Neisseria, Providencia, Pseudomonas_aeruginosa, Salmonella, Serratia, Staphylococcus_pseudintermedius, Vibrio_parahaemolyticus')
-    parser.add_argument('--date', required=False, type=str, help='Only required when downloading reads from GenomeTrackr. Will only download reads uploaded on or after the date specified in this argument. The corresponding column in the GenomeTrackr table is "target_creation_date". Date MUST be in the following format: YYYY-MM-DD.')
-    parser.add_argument('--genome_trackr_col', required=False, type=str, help='Name of column in GenomeTrackr table which will be used to select only rows which equal a particular value - this value can be set with --genome_trackr_col_value.')
-    parser.add_argument('--genome_trackr_col_value', required=False, type=str, help='Value in column of GenomeTrackr to use to select specific rows. Column name can be set with --genome_trackr_col.')
-    # Ensure that input files exist if specified
-
-    return parser.parse_args()
-
-
-def main():
-
-    ###
-    # Initilization
-    ###
-    args = get_arguments()
-    initialize_logging_file(args.logfile)
-    check_fastq_dump_version()
-    sra_runs = []
-
-    # key: accession, value: reason for failure
-    failed_acc = {}
-
-    ###
-    # Check arguments
-    ###
-
-    # do a check to make sure date is in the right format
-    if args.date:
-        validate(args.date)
-
-    input_accessions = set()
-    if args.accessions:
-        input_accessions |= set(args.accessions)
-        plural = '' if len(args.accessions) == 1 else 's'
-        logging.info('Successfully read in ' + str(len(args.accessions)) + ' accession' + plural)
-    if args.accession_list:
-        logging.info('Reading in accession list file %s' % args.accession_list)
-        with args.accession_list.open('r') as fh:
-            input_accessions_from_file = {line.rstrip() for line in fh}
-
-        plural = '' if len(input_accessions_from_file) == 1 else 's'
-        logging.info('Successfully read in ' + str(len(input_accessions_from_file)) + ' accession' + plural + ' from file ' + str(args.accession_list))
-        input_accessions |= input_accessions_from_file
-
-    if args.accessions or args.accession_list:
-        # Construct validators
-        type_suffices = {sra_runs_from_bioproject_accessions: 'P',
-                         sra_runs_from_biosample_accessions: 'S',
-                         sra_runs_from_sra_experiment_accessions: 'X',
-                         sra_runs_from_sra_run_accessions: 'R'}
-        validators = construct_accession_validators(type_suffices)
-
-        # Validate and sort input accessions
-        validated_accessions = validate_accessions(input_accessions, validators, type_suffices)
-
-        # Init SraRun objects from sorted accessions using appropriate function
-        for func, accessions in validated_accessions.items():
-            if accessions:
-                sra_runs.extend(func(accessions))
-
-    ###
-    # Locate accessions for all reads from a GenomeTrackr species
-    ###
-    if args.species:
-        # add to the list of sra objects for each biosample
-        sra_runs += sra_runs_from_biosample_accessions(parse_genome_trackr(args.species, args.date, args.genome_trackr_col, args.genome_trackr_col_value))
-
-
-    # Use asyncio to download reads in parallel.
-    loop = asyncio.get_event_loop()
-    async_futures = asyncio.gather(*[x.download_task(args.download_jobs) for x in sra_runs])
-    logging.info('Downloading reads...')
-    loop.run_until_complete(async_futures)
-    loop.close()
-
-    ###
-    # Write output files
-    ###
-
-    with open('accession_master_list.csv', 'w') as master_list:
-        header = ('run_accession', 'experiment_accession', 'biosample_accession', 'library_source', 'seq_platform', 'file_locations')
-        print(*header, sep='\t', file=master_list)
-        # Write out some data associated with each accession and any error(s)
-        for sra_run in sra_runs:
-            if sra_run.error:
-                logging.info('Error downloading %s: %s', sra_run.accession, sra_run.error)
-            else:
-                data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession, sra_run.experiment.library_source, sra_run.experiment.platform, ' '.join(sra_run.output_fps))
-                print(*data, sep='\t', file=master_list)
 
 if __name__ == '__main__':
     main()
