@@ -47,6 +47,8 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import time
 
+__version__ = '0.1.0'
+
 
 class BadAccession(Exception):
     pass
@@ -642,7 +644,9 @@ def check_fastq_dump_version():
 def get_arguments():
 
     parser = argparse.ArgumentParser(description='Download reads from NCBI')
-
+    parser.add_argument('--version', action='version',
+                        version='SRA Read Downloader v' + __version__,
+                        help="Show Kaptive's version number and exit")
     parser.add_argument('--accession_list', required=False, type=pathlib.Path,
                         help='File of accessions (one per line)')
     parser.add_argument('--accessions', required=False, type=str, nargs='+',
