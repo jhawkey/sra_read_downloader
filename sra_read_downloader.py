@@ -47,7 +47,7 @@ import sys
 import urllib.request
 import shutil
 import subprocess
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as Et
 import pandas as pd
 
 __version__ = '0.1.0'
@@ -94,7 +94,7 @@ def get_arguments():
 
 def main():
     args = get_arguments()
-    initialize_logging_file(args.logfile)
+    initialise_logging_file(args.logfile)
     check_fastq_dump_version()
     sra_runs = []
     
@@ -223,7 +223,7 @@ def uids_from_accession(accessions, database):
     # Make GET request
     with urllib.request.urlopen(esearch_url) as esearch_response:
         esearch_xml = esearch_response.read()
-        esearch_root = ET.fromstring(esearch_xml)
+        esearch_root = Et.fromstring(esearch_xml)
         uids = [x.text for x in esearch_root.findall('./IdList/Id')]
         if len(accessions) != len(uids):
             raise BadAccession
@@ -235,7 +235,7 @@ def biosample_uids_from_bioproject_uids(bioproject_uids):
                 '?dbfrom=bioproject&db=biosample&id=' + ','.join(bioproject_uids)
     with urllib.request.urlopen(elink_url) as elink_response:
         elink_xml = elink_response.read()
-        elink_root = ET.fromstring(elink_xml)
+        elink_root = Et.fromstring(elink_xml)
         for link_set_db in elink_root.findall('./LinkSet/LinkSetDb'):
             if link_set_db.find('./LinkName').text == 'bioproject_biosample_all':
                 return [x.text for x in link_set_db.findall('./Link/Id')]
@@ -247,7 +247,7 @@ def biosample_uids_from_sra_run_uids(sra_run_uids):
                 '?dbfrom=sra&db=biosample&id=' + ','.join(sra_run_uids)
     with urllib.request.urlopen(elink_url) as elink_response:
         elink_xml = elink_response.read()
-        elink_root = ET.fromstring(elink_xml)
+        elink_root = Et.fromstring(elink_xml)
         for link_set_db in elink_root.findall('./LinkSet/LinkSetDb'):
             if link_set_db.find('./LinkName').text == 'sra_biosample':
                 return [x.text for x in link_set_db.findall('./Link/Id')]
@@ -264,7 +264,7 @@ def biosamples_from_biosample_uids(biosample_uids):
 
     with urllib.request.urlopen(efetch_url) as efetch_response:
         efetch_xml = efetch_response.read()
-        efetch_root = ET.fromstring(efetch_xml)
+        efetch_root = Et.fromstring(efetch_xml)
         for biosample_xml in efetch_root.findall('./BioSample'):
             biosamples.append(BioSample(biosample_xml))
 
@@ -273,7 +273,7 @@ def biosamples_from_biosample_uids(biosample_uids):
                 '?dbfrom=biosample&db=sra&id=' + ','.join(b.uid for b in biosamples)
     with urllib.request.urlopen(elink_url) as elink_response:
         elink_xml = elink_response.read()
-        elink_root = ET.fromstring(elink_xml)
+        elink_root = Et.fromstring(elink_xml)
         sra_experiment_uids = [x.text for x in elink_root.findall('./LinkSet/LinkSetDb/Link/Id')]
         sra_experiments = sra_experiments_from_sra_experiment_uids(sra_experiment_uids)
 
@@ -304,7 +304,7 @@ def sra_experiments_from_sra_experiment_uids(sra_experiment_uids):
     sra_experiments = []
     with urllib.request.urlopen(efetch_url) as efetch_response:
         efetch_xml = efetch_response.read()
-        efetch_root = ET.fromstring(efetch_xml)
+        efetch_root = Et.fromstring(efetch_xml)
         for sra_experiment_xml in efetch_root.findall('./EXPERIMENT_PACKAGE'):
             sra_experiments.append(SraExperiment(sra_experiment_xml))
     return sra_experiments
@@ -329,7 +329,7 @@ def get_multiple_run_warning(runs, run_type, biosample):
 
 
 def construct_accession_validators(type_suffices):
-    '''Generate regex and associate with appropriate NCBI SRA API functions'''
+    """Generate regex and associate with appropriate NCBI SRA API functions"""
     # Construct validators
     validators = list()
 
@@ -354,7 +354,7 @@ def construct_accession_validators(type_suffices):
 
 
 def validate_accessions(input_accessions, validators, type_suffices):
-    '''Take a list of accessions and sort them using regex validators'''
+    """Take a list of accessions and sort them using regex validators"""
     # Return variable
     validated_accessions = {k: list() for k in type_suffices.keys()}
 
@@ -515,8 +515,8 @@ class SraRun(object):
         self.size = int(sra_run_xml.attrib.get('size'))
         self.published_date = sra_run_xml.attrib.get('published')
         statistics = sra_run_xml.find('Statistics')
-        #print(statistics.attrib.get('nreads'))
-        #self.read_file_count = int(statistics.attrib.get('nreads'))
+        # print(statistics.attrib.get('nreads'))
+        # self.read_file_count = int(statistics.attrib.get('nreads'))
         self.read_counts = []
         self.read_average_lengths = []
         self.read_stdevs = []
@@ -524,9 +524,9 @@ class SraRun(object):
             self.read_counts.append(int(read_file.attrib.get('count')))
             self.read_average_lengths.append(float(read_file.attrib.get('average')))
             self.read_stdevs.append(float(read_file.attrib.get('stdev')))
-        #assert len(self.read_counts) == self.read_file_count
-        #assert len(self.read_average_lengths) == self.read_file_count
-        #assert len(self.read_stdevs) == self.read_file_count
+        # assert len(self.read_counts) == self.read_file_count
+        # assert len(self.read_average_lengths) == self.read_file_count
+        # assert len(self.read_stdevs) == self.read_file_count
 
         self.attempts = 0
         self.max_attempts = 3
@@ -550,7 +550,8 @@ class SraRun(object):
             file_renames.append((old_name_2, new_name_2))
         else:
             old_name = self.accession + '.fastq.gz'
-            new_name = '%s_%s_%s.fastq.gz' % (self.sample.accession, self.accession, self.experiment.get_platform_short())
+            new_name = '%s_%s_%s.fastq.gz' % (self.sample.accession, self.accession,
+                                              self.experiment.get_platform_short())
             file_renames.append((old_name, new_name))
 
         for old_name, new_name in file_renames:
@@ -585,9 +586,9 @@ class SraRun(object):
             # Get a subprocess coroutine and execute
             logging.info('Downloading %s' % self.accession)
 
-
             process = await asyncio.create_subprocess_shell(fastq_dump_cmd,
-                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                                                            stdout=asyncio.subprocess.PIPE,
+                                                            stderr=asyncio.subprocess.PIPE)
 
             # Wait for subprocess to complete; blocking of current task
             stdout, stderr = await process.communicate()
@@ -612,7 +613,6 @@ class SraRun(object):
                     self.error = 'fastq-dump error: %s' % stderr.decode()
                     break
 
-
         # File renaming/ moving synchronous but this won't be an issue
         # ...unless we're somehow renaming/ moving files between filesystems
         try:
@@ -625,23 +625,23 @@ class SraRun(object):
 
 
 def validate_date_format(date_text):
-    '''
-    Check that date specified to script is valid
-    '''
+    """Check that date specified to script is valid."""
     try:
         datetime.datetime.strptime(date_text, '%Y-%m-%d')
     except ValueError:
-        logging.error('Date supplied (%s) for GenomeTrackr is in inccorrect format, should be YYYY-MM-DD.' % date_text)
+        logging.error('Date supplied (%s) for GenomeTrackr is in incorrect format,'
+                      'should be YYYY-MM-DD.' % date_text)
         raise ValueError("Incorrect data format, should be YYYY-MM-DD")
 
 
 # check that the table isn't empty
 def check_dataframe_status(data_frame):
     if data_frame.empty:
-        logging.error('GenomeTrackr table is empty, please check that any subsetting commands given are correct.')
+        logging.error('GenomeTrackr table is empty, please check that any subsetting commands '
+                      'given are correct.')
 
 
-def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_value):
+def parse_genome_trackr(species, date, trackr_col, trackr_col_value):
     logging.info('Connecting to GenomeTrackr FTP server...')
 
     # Putting a try statement here as sometimes there are issues connecting to the FTP server
@@ -654,7 +654,7 @@ def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_valu
         # most recent folder will be PDG directory with biggest number
         logging.info('Inspecting ' + species + ' directories...')
         dir_list = ftp.nlst()
-        # intialise number to check against to see if we have biggest number
+        # initialise number to check against to see if we have biggest number
         check_num = 0
         correct_dir = ''
         for directory in dir_list:
@@ -683,28 +683,37 @@ def parse_genome_trackr(species, date, genome_trackr_col, genome_trackr_col_valu
         genome_trackr_table = pd.read_csv(temp_tsv, sep='\t')
         # if there's a date, extract any samples on or after that date
         if date:
-            logging.info('Selecting only genomes that were added to the GenomeTrackr database on or after this date: %s' % date)
-            genome_trackr_table = genome_trackr_table[genome_trackr_table['target_creation_date'] >= date]
+            logging.info('Selecting only genomes that were added to the GenomeTrackr database on '
+                         'or after this date: %s' % date)
+            genome_trackr_table = \
+                genome_trackr_table[genome_trackr_table['target_creation_date'] >= date]
             # check table not empty
             check_dataframe_status(genome_trackr_table)
 
-        if genome_trackr_col:
+        if trackr_col:
             # extract only rows with column equaling value of interest
-            ## TO DO: Make this more robust
-            logging.info('Subsetting GenomeTrackr table on column %s with value of %s ...' % (genome_trackr_col, genome_trackr_col_value))
-            genome_trackr_table = genome_trackr_table[genome_trackr_table[genome_trackr_col] == genome_trackr_col_value]
+            # TO DO: Make this more robust
+            logging.info('Subsetting GenomeTrackr table on column %s with value of %s ...' %
+                         (trackr_col, trackr_col_value))
+            genome_trackr_table = \
+                genome_trackr_table[genome_trackr_table[trackr_col] == trackr_col_value]
             # check table not empty
             check_dataframe_status(genome_trackr_table)
         # get a list of all the biosample accessions for the entries of interest
         genome_trackr_biosample_accessions = list(genome_trackr_table['biosample_acc'])
-        logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' % str(len(genome_trackr_biosample_accessions)))
+        logging.info('Have a list of %s Biosamples for download from GenomeTrackr.' %
+                     str(len(genome_trackr_biosample_accessions)))
         return genome_trackr_biosample_accessions
 
     except OSError:
-        logging.info('Unable to connect to the GenomeTrackr FTP. You may want to try using a different computer/cluster or internet connection. Alternately, you can download the GenomeTrackr metadata file yourself from ftp-trace.ncbi.nih.gov/pathogen/Results/ and select your accessions of interest. These can then be passed to the script using --accession_list.')
+        logging.info('Unable to connect to the GenomeTrackr FTP. You may want to try using a '
+                     'different computer/cluster or internet connection. Alternately, you can '
+                     'download the GenomeTrackr metadata file yourself from '
+                     'ftp-trace.ncbi.nih.gov/pathogen/Results/ and select your accessions of '
+                     'interest. These can then be passed to the script using --accession_list.')
 
 
-def initialize_logging_file(logfile):
+def initialise_logging_file(logfile):
     logging.basicConfig(
         filename=logfile,
         level=logging.DEBUG,
@@ -741,6 +750,7 @@ def check_fastq_dump_version():
                       ') is not the current version (' + current_version + ')')
         sys.exit()
     logging.info('fastq-dump version (' + version_string + ') is good')
+
 
 if __name__ == '__main__':
     main()
