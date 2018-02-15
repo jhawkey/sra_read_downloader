@@ -217,7 +217,7 @@ def uids_from_accession(accessions, database):
         accessions = [accessions]
     # Format URL
     esearch_template_url = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/' \
-                           'esearch.fcgi?db=%s&term=%s'
+                           'esearch.fcgi?db=%s&term=%s&retmax=100000'
     esearch_url = esearch_template_url % (database, '+OR+'.join(accessions))
 
     # Make GET request
