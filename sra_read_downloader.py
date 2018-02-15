@@ -471,7 +471,6 @@ class SraExperiment(object):
                 if external_id.attrib.get('namespace') == 'BioSample':
                     self.biosample_accession = external_id.text
         library_descriptor = design.find('LIBRARY_DESCRIPTOR')
-        self.library_name = library_descriptor.find('LIBRARY_NAME').text
         self.library_strategy = library_descriptor.find('LIBRARY_STRATEGY').text
         self.library_source = library_descriptor.find('LIBRARY_SOURCE').text
         self.library_selection = library_descriptor.find('LIBRARY_SELECTION').text
