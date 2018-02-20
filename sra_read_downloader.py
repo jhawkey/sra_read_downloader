@@ -343,9 +343,9 @@ def construct_accession_validators(type_suffices):
         # Record
         validators.append((data_type, sra_validator))
 
-    # PRJ and SAMN
+    # PRJ and SAMN/SAMEA
     bioproject_validator = re.compile(r'^PRJ[A-Z]{2}[0-9]+$')
-    biosample_validator = re.compile(r'^SAMN[0-9]+$')
+    biosample_validator = re.compile(r'^SAM[NE]A?[0-9]+$')
 
     validators.append((sra_runs_from_bioproject_accessions, bioproject_validator))
     validators.append((sra_runs_from_biosample_accessions, biosample_validator))
@@ -514,18 +514,14 @@ class SraRun(object):
         self.size = int(sra_run_xml.attrib.get('size'))
         self.published_date = sra_run_xml.attrib.get('published')
         statistics = sra_run_xml.find('Statistics')
-        # print(statistics.attrib.get('nreads'))
-        # self.read_file_count = int(statistics.attrib.get('nreads'))
         self.read_counts = []
         self.read_average_lengths = []
         self.read_stdevs = []
-        for read_file in statistics.findall('Read'):
-            self.read_counts.append(int(read_file.attrib.get('count')))
-            self.read_average_lengths.append(float(read_file.attrib.get('average')))
-            self.read_stdevs.append(float(read_file.attrib.get('stdev')))
-        # assert len(self.read_counts) == self.read_file_count
-        # assert len(self.read_average_lengths) == self.read_file_count
-        # assert len(self.read_stdevs) == self.read_file_count
+        if statistics is not None:
+            for read_file in statistics.findall('Read'):
+                self.read_counts.append(int(read_file.attrib.get('count')))
+                self.read_average_lengths.append(float(read_file.attrib.get('average')))
+                self.read_stdevs.append(float(read_file.attrib.get('stdev')))
 
         self.attempts = 0
         self.max_attempts = 3
