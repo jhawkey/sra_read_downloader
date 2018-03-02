@@ -21,7 +21,8 @@ TO DO:
 * Lots of unit tests. Especially for weird cases, like BioSamples with multiple read sets.
 * Option to name reads with SRR ID only
 * Option to download all of a BioSample's reads (if there are multiple read sets of the same type)
-* Summary at the end of the output:
+ - DONE BUT TEST
+* Summary at the end of the output: (ALL DONE BUT TEST)
     * Number of successful downloads
     * Failed downloads (and what they are)
     * Sample-level warnings, like when a read set was ignored for a more recent alternative
@@ -58,7 +59,7 @@ def get_arguments():
     parser = argparse.ArgumentParser(description='Download reads from NCBI')
     parser.add_argument('--version', action='version',
                         version='SRA Read Downloader v' + __version__,
-                        help="Show Kaptive's version number and exit")
+                        help="Show version number and exit")
     parser.add_argument('--accession_list', required=False, type=pathlib.Path,
                         help='File of accessions (one per line)')
     parser.add_argument('--accessions', required=False, type=str, nargs='+',
@@ -67,6 +68,9 @@ def get_arguments():
                         help='Log file')
     parser.add_argument('--download_jobs', type=int, default=8,
                         help='Number of simultaneous downloads to run at once')
+    parser.add_argument('--get_all', action='store_true',
+                        help='Specify this flag if you wish to download all SRA runs for a BioSample, '
+                             'rather than the most recent.')
     parser.add_argument('--species', required=False, type=str,
                         help='Species from GenomeTrackr. Must be one of the following: '
                              'Acinetobacter, Campylobacter, Citrobacter_freundii, '
@@ -131,7 +135,10 @@ def main():
         # Init SraRun objects from sorted accessions using appropriate function
         for func, accessions in validated_accessions.items():
             if accessions:
-                sra_runs.extend(func(accessions))
+                if args.get_all:
+                    sra_runs.extend(func(accessions, get_all=True))
+                else:
+                    sra_runs.extend(func(accessions))
 
     # Locate accessions for all reads from a GenomeTrackr species
     if args.species:
@@ -152,45 +159,57 @@ def main():
                   'seq_platform', 'file_locations')
         master_list.write('\t'.join(header))
         # Write out some data associated with each accession and any error(s)
+        logging.info('Attempted to download %s SRA runs', len(sra_runs))
         for sra_run in sra_runs:
+            error_downloads = 0
             if sra_run.error:
                 logging.info('Error downloading %s: %s', sra_run.accession, sra_run.error)
+                error_downloads += 1
             else:
                 data = (sra_run.accession, sra_run.experiment.accession, sra_run.sample.accession,
                         sra_run.experiment.library_source, sra_run.experiment.platform,
                         ' '.join(sra_run.output_fps))
                 master_list.write('\t'.join(data))
+        logging.info('Successful downloads: %s', len(sra_runs) - error_downloads)
+        logging.info('Failed downloads: %s', error_downloads)
+    with open('all_warnings.log', 'w') as warning_logfile:
+        accessions_seen = set()
+        for sra_run in sra_runs:
+            if sra_run.sample.accession not in accessions_seen:
+                accessions_seen.add(sra_run.sample.accession)
+                warning_logfile.write(sra_run.sample.accession + '\t'.join(sra_run.sample.warnings) + '\n')
+
 
 class BadAccession(Exception):
     pass
 
 
-def sra_runs_from_bioproject_accessions(bioproject_accs):
+def sra_runs_from_bioproject_accessions(bioproject_accs, get_all=False):
     sra_runs = []
     bioproject_uids = uids_from_accession(bioproject_accs, 'bioproject')
     biosample_uids = biosample_uids_from_bioproject_uids(bioproject_uids)
     biosamples = biosamples_from_biosample_uids(biosample_uids)
     for biosample in biosamples:
-        sra_runs += biosample.get_sra_runs()
+        sra_runs += biosample.get_sra_runs(get_all=get_all)
     return sra_runs
 
 
-def sra_runs_from_biosample_accessions(biosample_accs):
+def sra_runs_from_biosample_accessions(biosample_accs, get_all=False):
     sra_runs = []
     biosample_uids = uids_from_accession(biosample_accs, 'biosample')
     biosamples = biosamples_from_biosample_uids(biosample_uids)
     for biosample in biosamples:
-        sra_runs += biosample.get_sra_runs()
+        sra_runs += biosample.get_sra_runs(get_all=get_all)
     return sra_runs
 
 
-def sra_runs_from_sra_accessions(sra_accs):
+def sra_runs_from_sra_accessions(sra_accs, get_all=False):
     sra_runs = []
     sra_run_uids = uids_from_accession(sra_accs, 'sra')
     biosample_uids = biosample_uids_from_sra_run_uids(sra_run_uids)
     biosamples = biosamples_from_biosample_uids(biosample_uids)
     for biosample in biosamples:
-        sra_runs += biosample.get_sra_runs(sra_accs)
+        sra_runs += biosample.get_sra_runs(sra_accs, get_all=get_all)
     return sra_runs
 
 
@@ -389,6 +408,7 @@ class BioSample(object):
         self.illumina_experiments = []
         self.long_read_experiments = []
         self.other_experiments = []
+        self.warnings = []
 
     def __repr__(self):
         biosample_repr = str(self.accession) + ' (' + self.taxonomy_name
@@ -413,7 +433,7 @@ class BioSample(object):
         for run in runs:
             run.sample = self
 
-    def get_sra_runs(self, sra_accs=None):
+    def get_sra_runs(self, sra_accs=None, get_all=False):
         """
         This function returns the SRA run accessions for this BioSample. It will include both
         Illumina and long read SRA runs. If there are multiple runs in a category (e.g. more than
@@ -442,13 +462,25 @@ class BioSample(object):
         if illumina_runs:
             runs.append(illumina_runs[0])
             if len(illumina_runs) > 1:
-                logging.warning(get_multiple_run_warning(illumina_runs, 'Illumina', self))
+                if get_all:
+                    runs.append(illumina_runs[1:])
+                else:
+                    logging.warning(get_multiple_run_warning(illumina_runs, 'Illumina', self))
+                    self.warnings.append(get_multiple_run_warning(illumina_runs, 'Illumina', self))
         if long_read_runs:
             runs.append(long_read_runs[0])
             if len(long_read_runs) > 1:
-                logging.warning(get_multiple_run_warning(long_read_runs, 'long read', self))
+                if get_all:
+                    runs.append(long_read_runs[1:])
+                else:
+                    logging.warning(get_multiple_run_warning(long_read_runs, 'long read', self))
+                    self.warnings.append(get_multiple_run_warning(long_read_runs, 'long read', self))
+
         if other_runs:
             logging.warning('There were runs associated with sample ' + self.accession + ' which '
+                            'were neither Illumina reads nor long reads. They were ignored: ' +
+                            ', '.join(x.accession for x in other_runs))
+            self.warnings.append('There were runs associated with sample ' + self.accession + ' which '
                             'were neither Illumina reads nor long reads. They were ignored: ' +
                             ', '.join(x.accession for x in other_runs))
         return runs
