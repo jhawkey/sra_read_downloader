@@ -49,6 +49,7 @@ import shutil
 import subprocess
 import xml.etree.ElementTree as Et
 import pandas as pd
+import time
 
 __version__ = '0.1.0'
 
@@ -97,7 +98,7 @@ def main():
     initialise_logging_file(args.logfile)
     check_fastq_dump_version()
     sra_runs = []
-    
+
     if args.date:
         validate_date_format(args.date)
 
@@ -159,7 +160,6 @@ def main():
                         sra_run.experiment.library_source, sra_run.experiment.platform,
                         ' '.join(sra_run.output_fps))
                 master_list.write('\t'.join(data))
-
 
 class BadAccession(Exception):
     pass
